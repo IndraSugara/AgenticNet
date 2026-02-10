@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Network Agent - LangGraph Powered</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/dashboard.css">
+    <link rel="icon" href="/static/favicon.svg" type="image/svg+xml">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+</head>
+<body>
+    <!-- SVG Icon Definitions -->
+    <svg style="display: none;">
+        <defs>
+            <!-- User Icon -->
+            <symbol id="icon-user" viewBox="0 0 24 24">
+                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                <circle cx="12" cy="7" r="4"/>
+            </symbol>
+
+            <!-- Robot/AI Icon -->
+            <symbol id="icon-robot" viewBox="0 0 24 24">
+                <rect x="3" y="8" width="18" height="12" rx="2"/>
+                <circle cx="9" cy="14" r="2"/>
+                <circle cx="15" cy="14" r="2"/>
+                <path d="M12 2v4"/>
+                <circle cx="12" cy="2" r="1"/>
+            </symbol>
+            
+            <!-- Chat/Message Icon -->
+            <symbol id="icon-chat" viewBox="0 0 24 24">
+                <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+            </symbol>
+            
+            <!-- Search/Magnifier Icon -->
+            <symbol id="icon-search" viewBox="0 0 24 24">
+                <circle cx="11" cy="11" r="8"/>
+                <path d="m21 21-4.3-4.3"/>
+            </symbol>
+            
+            <!-- Chart/Analytics Icon -->
+            <symbol id="icon-chart" viewBox="0 0 24 24">
+                <path d="M3 3v18h18"/>
+                <path d="m19 9-5 5-4-4-3 3"/>
+            </symbol>
+            
+            <!-- Lock/Security Icon -->
+            <symbol id="icon-lock" viewBox="0 0 24 24">
+                <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </symbol>
+            
+            <!-- Check Circle Icon -->
+            <symbol id="icon-check-circle" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="m9 12 2 2 4-4"/>
+            </symbol>
+            
+            <!-- Signal/Ping Icon -->
+            <symbol id="icon-signal" viewBox="0 0 24 24">
+                <path d="M2 20h.01"/>
+                <path d="M7 20v-4"/>
+                <path d="M12 20v-8"/>
+                <path d="M17 20V8"/>
+                <path d="M22 4v16"/>
+            </symbol>
+            
+            <!-- Radar/Port Scan Icon -->
+            <symbol id="icon-radar" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 2a10 10 0 0 1 10 10"/>
+                <path d="M12 12l4-4"/>
+                <circle cx="12" cy="12" r="3"/>
+            </symbol>
+            
+            <!-- Globe/DNS Icon -->
+            <symbol id="icon-globe" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/>
+                <path d="M2 12h20"/>
+            </symbol>
+            
+            <!-- Info Icon -->
+            <symbol id="icon-info" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10"/>
+                <path d="M12 16v-4"/>
+                <path d="M12 8h.01"/>
+            </symbol>
+            
+            <!-- History/Clock Icon -->
+            <symbol id="icon-history" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+            </symbol>
+            <symbol id="icon-clock" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10"/>
+                <polyline points="12 6 12 12 16 14"/>
+            </symbol>
+            
+            <!-- Wifi/Network Icon -->
+            <symbol id="icon-wifi" viewBox="0 0 24 24">
+                <path d="M5 12.55a11 11 0 0 1 14.08 0"/>
+                <path d="M1.42 9a16 16 0 0 1 21.16 0"/>
+                <path d="M8.53 16.11a6 6 0 0 1 6.95 0"/>
+                <circle cx="12" cy="20" r="1"/>
+            </symbol>
+            
+            <!-- Activity/Monitoring Icon -->
+            <symbol id="icon-activity" viewBox="0 0 24 24">
+                <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+            </symbol>
+            
+            <!-- Wrench/Tools Icon -->
+            <symbol id="icon-wrench" viewBox="0 0 24 24">
+                <path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/>
+            </symbol>
+            
+            <!-- Send Icon -->
+            <symbol id="icon-send" viewBox="0 0 24 24">
+                <path d="m22 2-7 20-4-9-9-4Z"/>
+                <path d="M22 2 11 13"/>
+            </symbol>
+            
+            <!-- Server/Infrastructure Icon -->
+            <symbol id="icon-server" viewBox="0 0 24 24">
+                <rect x="2" y="2" width="20" height="8" rx="2" ry="2"/>
+                <rect x="2" y="14" width="20" height="8" rx="2" ry="2"/>
+                <line x1="6" y1="6" x2="6.01" y2="6"/>
+                <line x1="6" y1="18" x2="6.01" y2="18"/>
+            </symbol>
+            
+            <!-- Router Icon -->
+            <symbol id="icon-router" viewBox="0 0 24 24">
+                <rect x="2" y="14" width="20" height="8" rx="2"/>
+                <path d="M12 6V2"/>
+                <path d="M12 6a4 4 0 0 0-4 4"/>
+                <path d="M12 6a4 4 0 0 1 4 4"/>
+            </symbol>
+            
+            <!-- Alert/Bell Icon -->
+            <symbol id="icon-bell" viewBox="0 0 24 24">
+                <path d="M18 8A6 6 0 0 0 6 8c0 7-3 9-3 9h18s-3-2-3-9"/>
+                <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+            </symbol>
+
+            <!-- Alert Triangle Icon -->
+            <symbol id="icon-alert-triangle" viewBox="0 0 24 24">
+                <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/>
+                <line x1="12" y1="9" x2="12" y2="13"/>
+                <line x1="12" y1="17" x2="12.01" y2="17"/>
+            </symbol>
+            
+            <!-- Edit Icon -->
+            <symbol id="icon-edit" viewBox="0 0 24 24">
+                <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/>
+                <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/>
+            </symbol>
+            
+            <!-- Plus Icon -->
+            <symbol id="icon-plus" viewBox="0 0 24 24">
+                <line x1="12" y1="5" x2="12" y2="19"/>
+                <line x1="5" y1="12" x2="19" y2="12"/>
+            </symbol>
+            
+            <!-- Play Icon -->
+            <symbol id="icon-play" viewBox="0 0 24 24">
+                <polygon points="5 3 19 12 5 21 5 3"/>
+            </symbol>
+            
+            <!-- Stop Icon -->
+            <symbol id="icon-stop" viewBox="0 0 24 24">
+                <rect x="3" y="3" width="18" height="18" rx="2" ry="2"/>
+            </symbol>
+            
+            <!-- Refresh Icon -->
+            <symbol id="icon-refresh" viewBox="0 0 24 24">
+                <polyline points="23 4 23 10 17 10"/>
+                <polyline points="1 20 1 14 7 14"/>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/>
+            </symbol>
+            
+            <!-- Trash Icon -->
+            <symbol id="icon-trash" viewBox="0 0 24 24">
+                <polyline points="3 6 5 6 21 6"/>
+                <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/>
+            </symbol>
+            
+            <!-- Download Icon -->
+            <symbol id="icon-download" viewBox="0 0 24 24">
+                <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
+                <polyline points="7 10 12 15 17 10"/>
+                <line x1="12" y1="15" x2="12" y2="3"/>
+            </symbol>
+
+            <!-- Maximize/Expand Icon -->
+            <symbol id="icon-maximize" viewBox="0 0 24 24">
+                <polyline points="15 3 21 3 21 9"/>
+                <polyline points="9 21 3 21 3 15"/>
+                <line x1="21" y1="3" x2="14" y2="10"/>
+                <line x1="3" y1="21" x2="10" y2="14"/>
+            </symbol>
+
+            <!-- Minimize Icon -->
+            <symbol id="icon-minimize" viewBox="0 0 24 24">
+                <polyline points="4 14 10 14 10 20"/>
+                <polyline points="20 10 14 10 14 4"/>
+                <line x1="14" y1="10" x2="21" y2="3"/>
+                <line x1="3" y1="21" x2="10" y2="14"/>
+            </symbol>
+
+            <!-- New Chat / Plus Circle Icon -->
+            <symbol id="icon-plus-circle" viewBox="0 0 24 24">
+                <circle cx="12" cy="12" r="10"/>
+                <line x1="12" y1="8" x2="12" y2="16"/>
+                <line x1="8" y1="12" x2="16" y2="12"/>
+            </symbol>
+
+            <!-- PC Icon -->
+            <symbol id="icon-pc" viewBox="0 0 24 24">
+                <rect x="2" y="3" width="20" height="14" rx="2" ry="2"/>
+                <line x1="8" y1="21" x2="16" y2="21"/>
+                <line x1="12" y1="17" x2="12" y2="21"/>
+            </symbol>
+
+            <!-- Printer Icon -->
+            <symbol id="icon-printer" viewBox="0 0 24 24">
+                <polyline points="6 9 6 2 18 2 18 9"/>
+                <path d="M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2"/>
+                <rect x="6" y="14" width="12" height="8"/>
+            </symbol>
+
+            <!-- Switch Icon -->
+            <symbol id="icon-switch" viewBox="0 0 24 24">
+                <rect x="1" y="5" width="22" height="14" rx="2"/>
+                <line x1="5" y1="9" x2="5" y2="15"/>
+                <line x1="9" y1="9" x2="9" y2="15"/>
+                <line x1="13" y1="9" x2="13" y2="15"/>
+                <line x1="17" y1="9" x2="17" y2="15"/>
+            </symbol>
+        </defs>
+    </svg>
+
+    <header class="header">
+        <div class="logo">
+            <div class="logo-icon">
+                <span class="icon">
+                    <svg><use href="#icon-server"/></svg>
+                </span>
+            </div>
+            <div class="logo-text">
+                <h1>Infrastructure Monitor</h1>
+                <span>Network Agent</span>
+            </div>
+        </div>
+        <div class="status-indicator" id="status-indicator">
+            <div class="status-dot"></div>
+            <span>Checking...</span>
+        </div>
+        <div class="ws-status-indicator">
+            <div class="ws-status-dot disconnected" id="ws-status-indicator"></div>
+            <span id="ws-status-text">Connecting...</span>
+        </div>
+    </header>
+
+    <main class="main-container">
+        <!-- MAIN SECTION: Infrastructure Monitoring -->
+        <section class="monitoring-section">
+            <div class="monitoring-header">
+                <h2>
+                    <span class="icon">
+                        <svg><use href="#icon-activity"/></svg>
+                    </span>
+                    Infrastructure Monitoring
+                </h2>
+                <div class="monitoring-controls">
+                    <button id="btn-monitor-toggle" class="control-btn primary" onclick="toggleMonitoring()">
+                        <span class="icon icon-sm">
+                            <svg><use href="#icon-play"/></svg>
+                        </span>
+                        <span id="monitor-btn-text">Start Monitoring</span>
+                    </button>
+                    <button class="control-btn" onclick="checkAllDevices()">
+                        <span class="icon icon-sm">
+                            <svg><use href="#icon-refresh"/></svg>
+                        </span>
+                        Check All
+                    </button>
+                    <button class="control-btn" onclick="showAddDevice()">
+                        <span class="icon icon-sm">
+                            <svg><use href="#icon-plus"/></svg>
+                        </span>
+                        Add Device
+                    </button>
+                </div>
+            </div>
+
+            <!-- Summary Cards -->
+            <div class="summary-cards">
+                <div class="summary-card">
+                    <div class="summary-icon total">
+                        <span class="icon icon-lg"><svg><use href="#icon-server"/></svg></span>
+                    </div>
+                    <div class="summary-info">
+                        <span class="summary-value" id="infra-total">0</span>
+                        <span class="summary-label">Total Devices</span>
+                    </div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-icon online">
+                        <span class="icon icon-lg"><svg><use href="#icon-check-circle"/></svg></span>
+                    </div>
+                    <div class="summary-info">
+                        <span class="summary-value" id="infra-online">0</span>
+                        <span class="summary-label">Online</span>
+                    </div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-icon offline">
+                        <span class="icon icon-lg"><svg><use href="#icon-activity"/></svg></span>
+                    </div>
+                    <div class="summary-info">
+                        <span class="summary-value" id="infra-offline">0</span>
+                        <span class="summary-label">Offline</span>
+                    </div>
+                </div>
+                <div class="summary-card">
+                    <div class="summary-icon alerts">
+                        <span class="icon icon-lg"><svg><use href="#icon-bell"/></svg></span>
+                    </div>
+                    <div class="summary-info">
+                        <span class="summary-value" id="alert-count">0</span>
+                        <span class="summary-label">Alerts</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Monitoring Content with Tabs -->
+            <div class="monitoring-content">
+                <div class="content-tabs">
+                    <button class="content-tab active" onclick="switchMainTab('devices')">
+                        <span class="icon"><svg><use href="#icon-server"/></svg></span>
+                        Devices
+                    </button>
+                    <button class="content-tab" onclick="switchMainTab('system')">
+                        <span class="icon"><svg><use href="#icon-chart"/></svg></span>
+                        System
+                    </button>
+                    <button class="content-tab" onclick="switchMainTab('network')">
+                        <span class="icon"><svg><use href="#icon-wifi"/></svg></span>
+                        Network
+                    </button>
+                    <button class="content-tab" onclick="switchMainTab('alerts')">
+                        <span class="icon"><svg><use href="#icon-bell"/></svg></span>
+                        Alerts
+                    </button>
+                </div>
+
+                <!-- Devices Tab -->
+                <div id="main-tab-devices" class="main-tab-panel active">
+                    <div class="devices-grid" id="devices-grid">
+                        <div class="device-card empty">
+                            <span class="icon icon-xl"><svg><use href="#icon-plus"/></svg></span>
+                            <p>No devices registered</p>
+                            <button class="btn-add-device" onclick="showAddDevice()">Add First Device</button>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- System Tab -->
+                <div id="main-tab-system" class="main-tab-panel">
+                    <div class="system-metrics-grid">
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="metric-title">CPU Usage</span>
+                                <span class="metric-value" id="cpu-value2">--%</span>
+                            </div>
+                            <div class="metric-bar">
+                                <div class="metric-bar-fill low" id="cpu-bar2" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="metric-title">Memory Usage</span>
+                                <span class="metric-value" id="memory-value2">--%</span>
+                            </div>
+                            <div class="metric-bar">
+                                <div class="metric-bar-fill low" id="memory-bar2" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="metric-title">Disk Usage</span>
+                                <span class="metric-value" id="disk-value2">--%</span>
+                            </div>
+                            <div class="metric-bar">
+                                <div class="metric-bar-fill low" id="disk-bar2" style="width: 0%"></div>
+                            </div>
+                        </div>
+                        <div class="metric-card">
+                            <div class="metric-header">
+                                <span class="metric-title">Uptime</span>
+                                <span class="metric-value" id="uptime-value2">--h</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- CPU Per-Core Stats -->
+                    <div class="metrics-detail-section">
+                        <h4>CPU Cores</h4>
+                        <div class="cpu-cores-grid" id="cpu-cores-grid">
+                            <div class="cpu-core-item">Loading...</div>
+                        </div>
+                    </div>
+
+                    <!-- Memory Breakdown -->
+                    <div class="metrics-detail-section">
+                        <h4>Memory Details</h4>
+                        <div class="memory-breakdown">
+                            <div class="memory-stat">
+                                <span class="label">Used:</span>
+                                <span class="value" id="memory-used-gb">-- GB</span>
+                            </div>
+                            <div class="memory-stat">
+                                <span class="label">Available:</span>
+                                <span class="value" id="memory-available-gb">-- GB</span>
+                            </div>
+                            <div class="memory-stat">
+                                <span class="label">Cached:</span>
+                                <span class="value" id="memory-cached-gb">-- GB</span>
+                            </div>
+                            <div class="memory-stat">
+                                <span class="label">Total:</span>
+                                <span class="value" id="memory-total-gb">-- GB</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Disk I/O -->
+                    <div class="metrics-detail-section">
+                        <h4>Disk I/O</h4>
+                        <div class="disk-io-stats">
+                            <div class="io-stat read">
+                                <span class="icon"><svg><use href="#icon-download"/></svg></span>
+                                <div class="io-info">
+                                    <span class="io-label">Read Rate</span>
+                                    <span class="io-value" id="disk-read-mb">-- MB/s</span>
+                                </div>
+                            </div>
+                            <div class="io-stat write">
+                                <span class="icon"><svg><use href="#icon-signal"/></svg></span>
+                                <div class="io-info">
+                                    <span class="io-label">Write Rate</span>
+                                    <span class="io-value" id="disk-write-mb">-- MB/s</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Temperature Sensors (if available) -->
+                    <div class="metrics-detail-section" id="temperature-section" style="display: none;">
+                        <h4>Temperature Sensors</h4>
+                        <div class="temperature-grid" id="temperature-grid">
+                            <!-- Populated dynamically -->
+                        </div>
+                    </div>
+
+                    <!-- Network Transfer Stats -->
+                    <div class="network-transfer-stats">
+                        <div class="transfer-stat upload">
+                            <span class="icon"><svg><use href="#icon-signal"/></svg></span>
+                            <div class="transfer-info">
+                                <span class="transfer-label">Data Sent</span>
+                                <span class="transfer-value" id="upload-value">-- MB</span>
+                            </div>
+                        </div>
+                        <div class="transfer-stat download">
+                            <span class="icon"><svg><use href="#icon-signal"/></svg></span>
+                            <div class="transfer-info">
+                                <span class="transfer-label">Data Received</span>
+                                <span class="transfer-value" id="download-value">-- MB</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Network Tab -->
+                <div id="main-tab-network" class="main-tab-panel">
+                    <div class="network-grid">
+                        <div class="network-section">
+                            <h4>Latency</h4>
+                            <div class="latency-grid" id="latency-grid">
+                                <div class="latency-card">
+                                    <div class="host">Google DNS</div>
+                                    <div class="value" id="latency-8888">--ms</div>
+                                </div>
+                                <div class="latency-card">
+                                    <div class="host">Cloudflare</div>
+                                    <div class="value" id="latency-1111">--ms</div>
+                                </div>
+                                <div class="latency-card">
+                                    <div class="host">Google</div>
+                                    <div class="value" id="latency-google">--ms</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="network-section">
+                            <h4>Bandwidth</h4>
+                            <div class="bandwidth-display">
+                                <div class="bandwidth-item upload">
+                                    <div class="label">↑ Upload</div>
+                                    <div class="rate" id="bw-upload">-- KB/s</div>
+                                </div>
+                                <div class="bandwidth-item download">
+                                    <div class="label">↓ Download</div>
+                                    <div class="rate" id="bw-download">-- KB/s</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="network-section full-width">
+                            <h4>Network Interfaces</h4>
+                            <div class="interface-list" id="interface-list">
+                                <div class="interface-item">
+                                    <span class="name">Loading...</span>
+                                    <span class="status">
+                                        <span class="status-dot"></span>
+                                    </span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Alerts Tab -->
+                <div id="main-tab-alerts" class="main-tab-panel">
+                    <div class="alerts-container" id="alert-list">
+                        <div class="alert-item empty">
+                            <span class="icon icon-lg"><svg><use href="#icon-check-circle"/></svg></span>
+                            <p>No active alerts</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </section>
+
+        <!-- SIDEBAR: Chat + Quick Tools -->
+        <aside class="chat-sidebar">
+            <!-- Agent Chat -->
+            <div class="chat-section">
+                <div class="chat-header">
+                    <h3>
+                        <span class="icon">
+                            <svg><use href="#icon-robot"/></svg>
+                        </span>
+                        Network Agent
+                    </h3>
+                    
+                    <div class="chat-actions">
+                        <div class="action-btn-dropdown">
+                            <button class="action-btn" onclick="toggleHistoryDropdown()" title="Chat History" id="btn-history">
+                                <span class="icon icon-sm"><svg><use href="#icon-clock"/></svg></span>
+                            </button>
+                            <div class="history-dropdown" id="history-dropdown">
+                                <div class="history-dropdown-header">
+                                    <span>Chat Sessions</span>
+                                    <button class="refresh-btn" onclick="loadChatThreads()" title="Refresh">
+                                        <span class="icon icon-sm"><svg><use href="#icon-refresh"/></svg></span>
+                                    </button>
+                                </div>
+                                <div class="chat-threads-list" id="chat-threads-list">
+                                    <div class="thread-item loading">Loading...</div>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="action-btn" onclick="newChat()" title="New Chat">
+                            <span class="icon icon-sm"><svg><use href="#icon-plus-circle"/></svg></span>
+                        </button>
+                        <button class="action-btn" onclick="toggleChatExpand()" title="Expand Chat" id="btn-expand-chat">
+                            <span class="icon icon-sm"><svg><use href="#icon-maximize"/></svg></span>
+                        </button>
+                        <button class="action-btn" onclick="clearChat()" title="Clear Chat">
+                            <span class="icon icon-sm"><svg><use href="#icon-trash"/></svg></span>
+                        </button>
+                    </div>
+                </div>
+                <div class="chat-messages" id="chat-messages">
+                    <div class="message agent">
+                        <div class="message-avatar">
+                            <span class="icon"><svg><use href="#icon-robot"/></svg></span>
+                        </div>
+                        <div class="message-content">
+                            <p>Halo! Saya AI Network Agent yang ditenagai dengan model <strong>{{model}}</strong>. Saya bisa membantu Anda memonitor dan mengelola jaringan Anda.</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="chat-input-container">
+                    <div class="quick-commands">
+                        <button class="quick-cmd" onclick="sendQuickCmd('ping 8.8.8.8')">
+                            <span class="icon"><svg><use href="#icon-wifi"/></svg></span> Ping
+                        </button>
+                        <button class="quick-cmd" onclick="sendQuickCmd('list semua device')">
+                            <span class="icon"><svg><use href="#icon-server"/></svg></span> Devices
+                        </button>
+                        <button class="quick-cmd" onclick="sendQuickCmd('cek info ISP saya')">
+                            <span class="icon"><svg><use href="#icon-globe"/></svg></span> ISP
+                        </button>
+                        <button class="quick-cmd" onclick="sendQuickCmd('cari panduan troubleshoot internet')">
+                            <span class="icon"><svg><use href="#icon-search"/></svg></span> Help
+                        </button>
+                    </div>
+                    <div class="chat-input-wrapper">
+                        <input type="text" class="chat-input" id="chat-input" 
+                               placeholder="Ketik perintah..." 
+                               autocomplete="off">
+                        <button class="send-button" id="send-button">
+                            <span class="icon icon-sm">
+                                <svg><use href="#icon-send"/></svg>
+                            </span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Quick Tools -->
+            <div class="sidebar-section">
+                <h3>
+                    <span class="icon">
+                        <svg><use href="#icon-wrench"/></svg>
+                    </span>
+                    Quick Tools
+                </h3>
+                
+                <div class="quick-tools">
+                    <button class="tool-button" onclick="runTool('ping')">
+                        <span class="icon">
+                            <svg><use href="#icon-signal"/></svg>
+                        </span>
+                        <span>Ping</span>
+                    </button>
+                    <button class="tool-button" onclick="runTool('port_scan')">
+                        <span class="icon">
+                            <svg><use href="#icon-radar"/></svg>
+                        </span>
+                        <span>Port Scan</span>
+                    </button>
+                    <button class="tool-button" onclick="runTool('dns')">
+                        <span class="icon">
+                            <svg><use href="#icon-globe"/></svg>
+                        </span>
+                        <span>DNS</span>
+                    </button>
+                    <button class="tool-button" onclick="runTool('network_info')">
+                        <span class="icon">
+                            <svg><use href="#icon-info"/></svg>
+                        </span>
+                        <span>Net Info</span>
+                    </button>
+                </div>
+            </div>
+
+            <!-- Status -->
+            <div class="sidebar-section">
+                <h3>
+                    <span class="icon">
+                        <svg><use href="#icon-activity"/></svg>
+                    </span>
+                    Status
+                </h3>
+                
+                <div class="status-cards">
+                    <!-- Ollama Status with Model Selector -->
+                    <div class="status-card">
+                        <div class="status-card-icon healthy" id="ollama-status-icon">
+                            <span class="icon icon-lg">
+                                <svg><use href="#icon-check-circle"/></svg>
+                            </span>
+                        </div>
+                        <div class="status-card-info">
+                            <h4>Ollama</h4>
+                            <span id="ollama-status">Checking...</span>
+                            <select id="model-select" class="model-dropdown-inline" title="Select LLM Model">
+                                <option value="gpt-oss:20b">GPT OSS 20B</option>
+                                <option value="glm-4.7-flash:latest">GLM 4.7 Flash</option>
+                            </select>
+                        </div>
+                    </div>
+                    
+                    <div class="status-card">
+                        <div class="status-card-icon healthy">
+                            <span class="icon icon-lg">
+                                <svg><use href="#icon-activity"/></svg>
+                            </span>
+                        </div>
+                        <div class="status-card-info">
+                            <h4>Monitor</h4>
+                            <span id="monitoring-status">Active</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Chat History -->
+            <div class="sidebar-section">
+                <h3>
+                    <span class="icon">
+                        <svg><use href="#icon-history"/></svg>
+                    </span>
+                    Chat History
+                </h3>
+                <div class="decision-list" id="decision-list">
+                    <div class="decision-item">
+                        <span>No messages yet</span>
+                    </div>
+                </div>
+            </div>
+        </aside>
+    </main>
+
+    <!-- Custom Modal Dialog -->
+    <div class="modal-overlay" id="modal-overlay">
+        <div class="modal-dialog">
+            <div class="modal-header">
+                <span class="modal-icon" id="modal-icon">
+                    <svg><use href="#icon-info"/></svg>
+                </span>
+                <h3 id="modal-title">Title</h3>
+            </div>
+            <div class="modal-body">
+                <p id="modal-message">Message</p>
+                <input type="text" class="modal-input" id="modal-input" placeholder="Enter value..." style="display: none;">
+            </div>
+            <div class="modal-footer" id="modal-footer">
+                <button class="modal-btn modal-btn-secondary" id="modal-cancel">Batal</button>
+                <button class="modal-btn modal-btn-primary" id="modal-confirm">OK</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/dashboard.js"></script>
+</body>
+</html>
