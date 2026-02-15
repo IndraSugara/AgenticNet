@@ -359,6 +359,32 @@ def register_network_tools():
         returns="ISP name, public IP, AS number, country, city, timezone",
         category="info"
     ))
+    
+    # Disable Interface (Local)
+    registry.register(ToolDefinition(
+        name="disable_interface",
+        description="Disable (shutdown) a local network interface. Requires admin privileges.",
+        function=network_tools.disable_interface,
+        parameters=[
+            ToolParameter("interface_name", "Name of the network interface to disable (e.g., 'Wi-Fi', 'Ethernet')")
+        ],
+        returns="Success/failure status of interface disable operation",
+        category="management",
+        risk_level="high"
+    ))
+    
+    # Enable Interface (Local)
+    registry.register(ToolDefinition(
+        name="enable_interface",
+        description="Enable (activate) a local network interface. Requires admin privileges.",
+        function=network_tools.enable_interface,
+        parameters=[
+            ToolParameter("interface_name", "Name of the network interface to enable (e.g., 'Wi-Fi', 'Ethernet')")
+        ],
+        returns="Success/failure status of interface enable operation",
+        category="management",
+        risk_level="high"
+    ))
 
 
 # Auto-register tools on import

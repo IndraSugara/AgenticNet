@@ -1174,6 +1174,13 @@ async function sendMessage() {
 
         if (data.success) {
             addMessage(data.response, 'agent');
+            
+            // Check for high-risk confirmation pattern
+            const actionIdMatch = data.response.match(/Action ID\s*:\s*([a-f0-9-]+)/i);
+            if (data.response.includes('KONFIRMASI DIPERLUKAN') && actionIdMatch) {
+                const actionId = actionIdMatch[1].trim();
+                handleHighRiskConfirmation(actionId, data.response);
+            }
         } else {
             addMessage('Error: ' + data.response, 'agent');
         }
@@ -1186,6 +1193,148 @@ async function sendMessage() {
     }
 
     sendButton.disabled = false;
+}
+
+/**
+ * Handle high-risk action confirmation — inline in chat
+ * Appends confirm/cancel buttons directly inside the chat message
+ */
+function handleHighRiskConfirmation(actionId, responseText) {
+    // Extract action description from response
+    const aksiMatch = responseText.match(/Aksi\s*:\s*(.+)/);
+    const risikoMatch = responseText.match(/Risiko\s*:\s*(.+)/);
+    
+    const aksi = aksiMatch ? aksiMatch[1].trim() : 'Aksi high-risk';
+    const risiko = risikoMatch ? risikoMatch[1].trim() : 'Tinggi';
+    
+    // Create inline confirmation card
+    const confirmDiv = document.createElement('div');
+    confirmDiv.className = 'message agent';
+    confirmDiv.innerHTML = `
+        <div class="message-avatar">
+            <span class="icon"><svg><use href="#icon-alert-triangle"/></svg></span>
+        </div>
+        <div class="message-content">
+            <div class="confirm-card">
+                <div class="confirm-header">
+                    <span class="confirm-icon">⚠️</span>
+                    <span class="confirm-title">Konfirmasi Diperlukan</span>
+                </div>
+                <div class="confirm-details">
+                    <div class="confirm-row">
+                        <span class="confirm-label">Aksi:</span>
+                        <span class="confirm-value">${aksi}</span>
+                    </div>
+                    <div class="confirm-row">
+                        <span class="confirm-label">Risiko:</span>
+                        <span class="confirm-value risk-high">${risiko}</span>
+                    </div>
+                </div>
+                <div class="confirm-actions" id="confirm-actions-${actionId}">
+                    <button class="confirm-btn confirm-yes" onclick="confirmHighRiskAction('${actionId}')">
+                        ✅ Ya, Lanjutkan
+                    </button>
+                    <button class="confirm-btn confirm-no" onclick="cancelHighRiskAction('${actionId}')">
+                        ❌ Batalkan
+                    </button>
+                </div>
+            </div>
+        </div>
+    `;
+    chatMessages.appendChild(confirmDiv);
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+}
+
+/**
+ * User confirmed the high-risk action
+ */
+async function confirmHighRiskAction(actionId) {
+    // Disable buttons immediately
+    const actionsDiv = document.getElementById(`confirm-actions-${actionId}`);
+    if (actionsDiv) {
+        actionsDiv.innerHTML = '<span class="confirm-status pending">⏳ Mengeksekusi...</span>';
+    }
+    
+    addMessage('Ya, lanjutkan.', 'user');
+    const loadingId = addLoading();
+    
+    try {
+        const response = await fetch('/agent/conversations/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                query: `Ya, saya konfirmasi. Jalankan confirm_action dengan action_id "${actionId}"`, 
+                thread_id: currentThreadId 
+            })
+        });
+        
+        const data = await response.json();
+        removeLoading(loadingId);
+        
+        if (data.success) {
+            addMessage(data.response, 'agent');
+        } else {
+            addMessage('Error: ' + data.response, 'agent');
+        }
+        
+        // Update inline status
+        if (actionsDiv) {
+            actionsDiv.innerHTML = '<span class="confirm-status done">✅ Dikonfirmasi</span>';
+        }
+        saveChatHistory();
+    } catch (e) {
+        removeLoading(loadingId);
+        addMessage('Error: ' + e.message, 'agent');
+        if (actionsDiv) {
+            actionsDiv.innerHTML = '<span class="confirm-status error">❌ Error</span>';
+        }
+    }
+}
+
+/**
+ * User cancelled the high-risk action
+ */
+async function cancelHighRiskAction(actionId) {
+    // Disable buttons immediately
+    const actionsDiv = document.getElementById(`confirm-actions-${actionId}`);
+    if (actionsDiv) {
+        actionsDiv.innerHTML = '<span class="confirm-status pending">⏳ Membatalkan...</span>';
+    }
+    
+    addMessage('Tidak, batalkan aksi tersebut.', 'user');
+    const loadingId = addLoading();
+    
+    try {
+        const response = await fetch('/agent/conversations/query', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                query: `Batalkan. Jalankan cancel_action dengan action_id "${actionId}"`, 
+                thread_id: currentThreadId 
+            })
+        });
+        
+        const data = await response.json();
+        removeLoading(loadingId);
+        
+        if (data.success) {
+            addMessage(data.response, 'agent');
+        } else {
+            addMessage('Error: ' + data.response, 'agent');
+        }
+        
+        // Update inline status
+        if (actionsDiv) {
+            actionsDiv.innerHTML = '<span class="confirm-status cancelled">🚫 Dibatalkan</span>';
+        }
+        saveChatHistory();
+    } catch (e) {
+        removeLoading(loadingId);
+        addMessage('Error: ' + e.message, 'agent');
+        if (actionsDiv) {
+            actionsDiv.innerHTML = '<span class="confirm-status error">❌ Error</span>';
+        }
+    }
 }
 
 function addMessage(content, type) {

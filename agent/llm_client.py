@@ -293,7 +293,7 @@ class LLMClient:
         if system_prompt:
             full_messages.append({"role": "system", "content": system_prompt})
         else:
-            full_messages.append({"role": "system", "content": config.SYSTEM_PROMPT})
+            full_messages.append({"role": "system", "content": "Kamu adalah AI Network Agent yang membantu mengelola infrastruktur jaringan."})
         
         full_messages.extend(messages)
         return full_messages

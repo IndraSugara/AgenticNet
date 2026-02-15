@@ -68,7 +68,7 @@ class ReportGenerator:
             Markdown report
         """
         from agent.infrastructure import infrastructure
-        from agent.alerts import alert_manager
+        from agent.alerting import alert_manager
         
         now = datetime.now()
         

@@ -13,6 +13,7 @@ from datetime import datetime
 from enum import Enum
 import asyncio
 import json
+import os
 
 try:
     import aiohttp
@@ -33,6 +34,8 @@ class AlertChannel(Enum):
     DASHBOARD = "dashboard"
     WEBHOOK = "webhook"
     EMAIL = "email"
+    DISCORD = "discord"
+    TELEGRAM = "telegram"
 
 
 @dataclass
@@ -85,6 +88,9 @@ class AlertManager:
         self._webhook_url: Optional[str] = None
         self._email_config: Dict[str, str] = {}
         self._dashboard_callback: Optional[Callable] = None
+        self._discord_webhook: Optional[str] = os.getenv("DISCORD_WEBHOOK_URL")
+        self._telegram_bot_token: Optional[str] = os.getenv("TELEGRAM_BOT_TOKEN")
+        self._telegram_chat_id: Optional[str] = os.getenv("TELEGRAM_CHAT_ID")
         self._channels: List[AlertChannel] = [AlertChannel.DASHBOARD]
     
     def _generate_id(self) -> str:
@@ -173,6 +179,10 @@ class AlertManager:
                 tasks.append(self._send_webhook(alert))
             elif channel == AlertChannel.EMAIL:
                 tasks.append(self._send_email(alert))
+            elif channel == AlertChannel.DISCORD:
+                tasks.append(self._send_discord(alert))
+            elif channel == AlertChannel.TELEGRAM:
+                tasks.append(self._send_telegram(alert))
         
         await asyncio.gather(*tasks, return_exceptions=True)
     
@@ -285,6 +295,102 @@ class AlertManager:
     def clear_resolved(self):
         """Clear all resolved alerts"""
         self.alerts = [a for a in self.alerts if not a.resolved]
+    
+    async def _send_discord(self, alert: Alert):
+        """Send alert to Discord webhook"""
+        if not self._discord_webhook or not AIOHTTP_AVAILABLE:
+            return
+        
+        colors = {
+            AlertSeverity.INFO: 0x3498db,     # Blue
+            AlertSeverity.WARNING: 0xf39c12,  # Orange
+            AlertSeverity.CRITICAL: 0xe74c3c  # Red
+        }
+        
+        emoji = {
+            AlertSeverity.INFO: "ℹ️",
+            AlertSeverity.WARNING: "⚠️",
+            AlertSeverity.CRITICAL: "🚨"
+        }
+        
+        payload = {
+            "embeds": [{
+                "title": f"{emoji[alert.severity]} {alert.severity.value.upper()} Alert",
+                "description": alert.message,
+                "color": colors[alert.severity],
+                "fields": [
+                    {"name": "Device", "value": alert.device_name, "inline": True},
+                    {"name": "IP", "value": alert.device_ip, "inline": True},
+                    {"name": "Time", "value": alert.timestamp[:19], "inline": True}
+                ],
+                "footer": {"text": f"Alert ID: {alert.id}"}
+            }]
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    self._discord_webhook,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status != 204:
+                        print(f"Discord webhook failed: {response.status}")
+        except Exception as e:
+            print(f"Discord notification error: {e}")
+    
+    async def _send_telegram(self, alert: Alert):
+        """Send alert to Telegram"""
+        if not self._telegram_bot_token or not self._telegram_chat_id or not AIOHTTP_AVAILABLE:
+            return
+        
+        emoji = {
+            AlertSeverity.INFO: "ℹ️",
+            AlertSeverity.WARNING: "⚠️",
+            AlertSeverity.CRITICAL: "🚨"
+        }
+        
+        text = f"""
+{emoji[alert.severity]} *{alert.severity.value.upper()} Alert*
+
+*Device:* {alert.device_name}
+*IP:* {alert.device_ip}
+*Message:* {alert.message}
+*Time:* {alert.timestamp[:19]}
+*ID:* `{alert.id}`
+"""
+        
+        url = f"https://api.telegram.org/bot{self._telegram_bot_token}/sendMessage"
+        payload = {
+            "chat_id": self._telegram_chat_id,
+            "text": text,
+            "parse_mode": "Markdown"
+        }
+        
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.post(
+                    url,
+                    json=payload,
+                    timeout=aiohttp.ClientTimeout(total=10)
+                ) as response:
+                    if response.status != 200:
+                        print(f"Telegram failed: {response.status}")
+        except Exception as e:
+            print(f"Telegram notification error: {e}")
+    
+    def configure_discord(self, webhook_url: str):
+        """Configure Discord webhook"""
+        self._discord_webhook = webhook_url
+        if AlertChannel.DISCORD not in self._channels:
+            self._channels.append(AlertChannel.DISCORD)
+    
+    def configure_telegram(self, bot_token: str, chat_id: str):
+        """Configure Telegram bot"""
+        self._telegram_bot_token = bot_token
+        self._telegram_chat_id = chat_id
+        if AlertChannel.TELEGRAM not in self._channels:
+            self._channels.append(AlertChannel.TELEGRAM)
 
 
 # Singleton instance

@@ -1125,6 +1125,112 @@ body {
     color: var(--accent);
 }
 
+/* ============= HIGH-RISK CONFIRMATION CARD (Inline Chat) ============= */
+.confirm-card {
+    background: rgba(255, 170, 0, 0.08);
+    border: 1px solid rgba(255, 170, 0, 0.3);
+    border-radius: 10px;
+    padding: 1rem;
+    margin-top: 0.5rem;
+}
+
+.confirm-header {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(255, 170, 0, 0.2);
+}
+
+.confirm-icon {
+    font-size: 1.2rem;
+}
+
+.confirm-title {
+    font-weight: 700;
+    font-size: 0.9rem;
+    color: var(--warning, #ffaa00);
+}
+
+.confirm-details {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-bottom: 0.75rem;
+}
+
+.confirm-row {
+    display: flex;
+    gap: 0.5rem;
+    font-size: 0.82rem;
+}
+
+.confirm-label {
+    color: var(--text-secondary);
+    font-weight: 500;
+    min-width: 50px;
+}
+
+.confirm-value {
+    color: var(--text-primary);
+}
+
+.confirm-value.risk-high {
+    color: var(--danger, #ff4757);
+    font-weight: 600;
+}
+
+.confirm-actions {
+    display: flex;
+    gap: 0.5rem;
+    margin-top: 0.25rem;
+}
+
+.confirm-btn {
+    padding: 0.5rem 1rem;
+    border: none;
+    border-radius: 6px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s;
+    font-family: inherit;
+}
+
+.confirm-btn.confirm-yes {
+    background: rgba(0, 255, 136, 0.15);
+    color: var(--success, #00ff88);
+    border: 1px solid rgba(0, 255, 136, 0.3);
+}
+
+.confirm-btn.confirm-yes:hover {
+    background: rgba(0, 255, 136, 0.25);
+    box-shadow: 0 2px 8px rgba(0, 255, 136, 0.2);
+}
+
+.confirm-btn.confirm-no {
+    background: rgba(255, 71, 87, 0.15);
+    color: var(--danger, #ff4757);
+    border: 1px solid rgba(255, 71, 87, 0.3);
+}
+
+.confirm-btn.confirm-no:hover {
+    background: rgba(255, 71, 87, 0.25);
+    box-shadow: 0 2px 8px rgba(255, 71, 87, 0.2);
+}
+
+.confirm-status {
+    font-size: 0.82rem;
+    font-weight: 500;
+    padding: 0.35rem 0;
+}
+
+.confirm-status.pending { color: var(--warning, #ffaa00); }
+.confirm-status.done { color: var(--success, #00ff88); }
+.confirm-status.cancelled { color: var(--text-secondary); }
+.confirm-status.error { color: var(--danger, #ff4757); }
+
 /* Chat Input */
 .chat-input-container {
     padding: 0.75rem;

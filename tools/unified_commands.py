@@ -458,5 +458,68 @@ class UnifiedCommandExecutor:
         )
 
 
+    async def shutdown_interface(self, device_ip: str, interface: str) -> NormalizedResult:
+        """Shutdown (disable) an interface on a remote device"""
+        device = inventory.get_device(device_ip)
+        if not device:
+            return NormalizedResult(
+                success=False, data={}, error=f"Device {device_ip} not found"
+            )
+        
+        result = await connection_manager.execute_on_device(
+            device_ip, 
+            UnifiedCommand.SHUTDOWN_INTERFACE,
+            {"interface": interface}
+        )
+        
+        if result.success:
+            return NormalizedResult(
+                success=True,
+                data={"interface": interface, "action": "shutdown", "status": "disabled"},
+                raw_output=result.output,
+                device_name=result.device_name,
+                command=result.command
+            )
+        
+        return NormalizedResult(
+            success=False,
+            data={},
+            error=result.error,
+            device_name=result.device_name,
+            command=result.command
+        )
+    
+    async def no_shutdown_interface(self, device_ip: str, interface: str) -> NormalizedResult:
+        """Enable (no shutdown) an interface on a remote device"""
+        device = inventory.get_device(device_ip)
+        if not device:
+            return NormalizedResult(
+                success=False, data={}, error=f"Device {device_ip} not found"
+            )
+        
+        result = await connection_manager.execute_on_device(
+            device_ip, 
+            UnifiedCommand.NO_SHUTDOWN_INTERFACE,
+            {"interface": interface}
+        )
+        
+        if result.success:
+            return NormalizedResult(
+                success=True,
+                data={"interface": interface, "action": "no shutdown", "status": "enabled"},
+                raw_output=result.output,
+                device_name=result.device_name,
+                command=result.command
+            )
+        
+        return NormalizedResult(
+            success=False,
+            data={},
+            error=result.error,
+            device_name=result.device_name,
+            command=result.command
+        )
+
+
 # Singleton executor
 unified_commands = UnifiedCommandExecutor()

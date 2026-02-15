@@ -130,7 +130,7 @@ def get_quick_status() -> str:
     """
     try:
         from agent.infrastructure import infrastructure
-        from agent.alerts import alert_manager
+        from agent.alerting import alert_manager
         
         devices = infrastructure.list_devices()
         online = sum(1 for d in devices if d.status and d.status.value == "online")

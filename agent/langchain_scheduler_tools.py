@@ -7,7 +7,7 @@ from typing import Optional
 from langchain_core.tools import tool
 
 from agent.scheduler import scheduler
-from agent.alerts import alert_manager
+from agent.alerting import alert_manager
 
 
 @tool

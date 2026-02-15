@@ -426,6 +426,81 @@ Timezone     : {info.get('timezone', 'N/A')}"""
             return ToolResult(False, "", info.get("error", "Unknown error"))
 
 
+    def disable_interface(self, interface_name: str) -> ToolResult:
+        """
+        Disable a local network interface.
+        
+        Args:
+            interface_name: Name of the interface to disable (e.g., 'Wi-Fi', 'Ethernet')
+        
+        Note: Requires administrator privileges on Windows.
+        """
+        try:
+            if self.is_windows:
+                cmd = ["netsh", "interface", "set", "interface", interface_name, "disable"]
+            else:
+                cmd = ["sudo", "ip", "link", "set", interface_name, "down"]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                return ToolResult(
+                    True, 
+                    f"✅ Interface '{interface_name}' berhasil dimatikan (disabled)"
+                )
+            else:
+                error_msg = result.stderr.strip() or result.stdout.strip()
+                if "requires elevation" in error_msg.lower() or "akses ditolak" in error_msg.lower() or "access" in error_msg.lower():
+                    return ToolResult(False, "", f"Gagal: Membutuhkan hak Administrator. Jalankan aplikasi sebagai Administrator.")
+                return ToolResult(False, "", f"Gagal mematikan interface: {error_msg}")
+        except subprocess.TimeoutExpired:
+            return ToolResult(False, "", "Timeout saat mematikan interface")
+        except Exception as e:
+            return ToolResult(False, "", str(e))
+    
+    def enable_interface(self, interface_name: str) -> ToolResult:
+        """
+        Enable a local network interface.
+        
+        Args:
+            interface_name: Name of the interface to enable (e.g., 'Wi-Fi', 'Ethernet')
+        
+        Note: Requires administrator privileges on Windows.
+        """
+        try:
+            if self.is_windows:
+                cmd = ["netsh", "interface", "set", "interface", interface_name, "enable"]
+            else:
+                cmd = ["sudo", "ip", "link", "set", interface_name, "up"]
+            
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                return ToolResult(
+                    True, 
+                    f"✅ Interface '{interface_name}' berhasil diaktifkan (enabled)"
+                )
+            else:
+                error_msg = result.stderr.strip() or result.stdout.strip()
+                if "requires elevation" in error_msg.lower() or "akses ditolak" in error_msg.lower() or "access" in error_msg.lower():
+                    return ToolResult(False, "", f"Gagal: Membutuhkan hak Administrator. Jalankan aplikasi sebagai Administrator.")
+                return ToolResult(False, "", f"Gagal mengaktifkan interface: {error_msg}")
+        except subprocess.TimeoutExpired:
+            return ToolResult(False, "", "Timeout saat mengaktifkan interface")
+        except Exception as e:
+            return ToolResult(False, "", str(e))
+
+
 # Singleton instance
 network_tools = NetworkTools()
 

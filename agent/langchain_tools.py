@@ -3,9 +3,11 @@ LangChain Tools for Network Diagnostics
 
 Converts network_tools to LangChain tool format for use with LangGraph agents.
 """
+import asyncio
 from typing import List, Optional
 from langchain_core.tools import tool
 from tools.network_tools import network_tools
+from tools.pending_actions import pending_store
 
 
 # ============= CONNECTIVITY TOOLS =============
@@ -250,6 +252,209 @@ Errors Out   : {result.get('errors_out', 0)}"""
     return f"Error: {result.get('error', 'Unknown error')}"
 
 
+# ============= HIGH-RISK INTERFACE MANAGEMENT TOOLS =============
+
+@tool
+def disable_local_interface(interface_name: str) -> str:
+    """
+    ⚠️ HIGH-RISK: Disable (shutdown) a local network interface.
+    This action requires confirmation before execution.
+    Requires administrator privileges.
+    
+    Args:
+        interface_name: Name of the interface to disable (e.g., 'Wi-Fi', 'Ethernet')
+    
+    Returns:
+        Confirmation request or execution result
+    """
+    action = pending_store.add(
+        tool_name="disable_interface",
+        params={"interface_name": interface_name},
+        description=f"Mematikan interface jaringan lokal '{interface_name}'",
+        risk_reason="Mematikan interface dapat memutus koneksi jaringan"
+    )
+    return (
+        f"⚠️ KONFIRMASI DIPERLUKAN\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Aksi      : Mematikan interface '{interface_name}'\n"
+        f"Risiko    : TINGGI - Koneksi jaringan akan terputus\n"
+        f"Action ID : {action.action_id}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Untuk melanjutkan, gunakan confirm_action dengan action_id '{action.action_id}'"
+    )
+
+
+@tool
+def enable_local_interface(interface_name: str) -> str:
+    """
+    ⚠️ HIGH-RISK: Enable (activate) a local network interface.
+    This action requires confirmation before execution.
+    Requires administrator privileges.
+    
+    Args:
+        interface_name: Name of the interface to enable (e.g., 'Wi-Fi', 'Ethernet')
+    
+    Returns:
+        Confirmation request or execution result
+    """
+    action = pending_store.add(
+        tool_name="enable_interface",
+        params={"interface_name": interface_name},
+        description=f"Mengaktifkan interface jaringan lokal '{interface_name}'",
+        risk_reason="Mengubah status interface dapat mempengaruhi koneksi jaringan"
+    )
+    return (
+        f"⚠️ KONFIRMASI DIPERLUKAN\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Aksi      : Mengaktifkan interface '{interface_name}'\n"
+        f"Risiko    : TINGGI - Konfigurasi jaringan akan berubah\n"
+        f"Action ID : {action.action_id}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Untuk melanjutkan, gunakan confirm_action dengan action_id '{action.action_id}'"
+    )
+
+
+@tool
+def shutdown_remote_interface(device_ip: str, interface: str) -> str:
+    """
+    ⚠️ HIGH-RISK: Shutdown an interface on a remote network device via SSH.
+    This action requires confirmation before execution.
+    
+    Args:
+        device_ip: IP address of the remote device
+        interface: Interface name on the device (e.g., 'GigabitEthernet0/1', 'ether1')
+    
+    Returns:
+        Confirmation request or execution result
+    """
+    action = pending_store.add(
+        tool_name="shutdown_remote_interface",
+        params={"device_ip": device_ip, "interface": interface},
+        description=f"Mematikan interface '{interface}' pada device {device_ip}",
+        risk_reason="Mematikan interface remote dapat memutus koneksi ke device atau segmen jaringan"
+    )
+    return (
+        f"⚠️ KONFIRMASI DIPERLUKAN\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Aksi      : Shutdown interface '{interface}' di {device_ip}\n"
+        f"Risiko    : TINGGI - Bisa memutus segmen jaringan\n"
+        f"Action ID : {action.action_id}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Untuk melanjutkan, gunakan confirm_action dengan action_id '{action.action_id}'"
+    )
+
+
+@tool
+def enable_remote_interface(device_ip: str, interface: str) -> str:
+    """
+    ⚠️ HIGH-RISK: Enable (no shutdown) an interface on a remote network device via SSH.
+    This action requires confirmation before execution.
+    
+    Args:
+        device_ip: IP address of the remote device
+        interface: Interface name on the device (e.g., 'GigabitEthernet0/1', 'ether1')
+    
+    Returns:
+        Confirmation request or execution result
+    """
+    action = pending_store.add(
+        tool_name="enable_remote_interface",
+        params={"device_ip": device_ip, "interface": interface},
+        description=f"Mengaktifkan interface '{interface}' pada device {device_ip}",
+        risk_reason="Mengaktifkan interface remote dapat mengubah topologi jaringan"
+    )
+    return (
+        f"⚠️ KONFIRMASI DIPERLUKAN\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Aksi      : Mengaktifkan interface '{interface}' di {device_ip}\n"
+        f"Risiko    : TINGGI - Topologi jaringan akan berubah\n"
+        f"Action ID : {action.action_id}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Untuk melanjutkan, gunakan confirm_action dengan action_id '{action.action_id}'"
+    )
+
+
+@tool
+def confirm_action(action_id: str) -> str:
+    """
+    Confirm and execute a pending high-risk action.
+    Use this after the user explicitly confirms they want to proceed.
+    
+    Args:
+        action_id: The action ID from the confirmation request
+    
+    Returns:
+        Execution result of the confirmed action
+    """
+    action = pending_store.get(action_id)
+    if not action:
+        return f"❌ Action '{action_id}' tidak ditemukan atau sudah expired (5 menit)"
+    
+    if action.confirmed:
+        return f"❌ Action '{action_id}' sudah dieksekusi sebelumnya"
+    
+    if action.cancelled:
+        return f"❌ Action '{action_id}' sudah dibatalkan"
+    
+    # Execute based on tool name
+    action.confirmed = True
+    
+    try:
+        if action.tool_name == "disable_interface":
+            result = network_tools.disable_interface(**action.params)
+            return result.output if result.success else f"❌ {result.error}"
+        
+        elif action.tool_name == "enable_interface":
+            result = network_tools.enable_interface(**action.params)
+            return result.output if result.success else f"❌ {result.error}"
+        
+        elif action.tool_name in ("shutdown_remote_interface", "enable_remote_interface"):
+            from tools.unified_commands import unified_commands
+            if action.tool_name == "shutdown_remote_interface":
+                coro = unified_commands.shutdown_interface(**action.params)
+            else:
+                coro = unified_commands.no_shutdown_interface(**action.params)
+            
+            # Run async function
+            try:
+                loop = asyncio.get_running_loop()
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = loop.run_in_executor(pool, lambda: asyncio.run(coro))
+            except RuntimeError:
+                result = asyncio.run(coro)
+            
+            if hasattr(result, 'success'):
+                if result.success:
+                    return f"✅ {action.description} berhasil dilakukan"
+                return f"❌ Gagal: {result.error}"
+            return f"✅ {action.description} berhasil dilakukan"
+        
+        else:
+            return f"❌ Executor untuk tool '{action.tool_name}' tidak ditemukan"
+    
+    except Exception as e:
+        return f"❌ Error saat eksekusi: {str(e)}"
+
+
+@tool
+def cancel_action(action_id: str) -> str:
+    """
+    Cancel a pending high-risk action.
+    Use this when the user declines/rejects the confirmation.
+    
+    Args:
+        action_id: The action ID to cancel
+    
+    Returns:
+        Cancellation status
+    """
+    result = pending_store.cancel(action_id)
+    if result.get("success"):
+        return f"✅ Action '{action_id}' berhasil dibatalkan"
+    return f"❌ {result.get('error', 'Gagal membatalkan action')}"
+
+
 # ============= TOOL COLLECTION =============
 
 def get_network_tools() -> list:
@@ -339,6 +544,16 @@ def get_all_tools() -> list:
     except ImportError:
         pass
     
+    # Add high-risk interface management tools
+    tools.extend([
+        disable_local_interface,
+        enable_local_interface,
+        shutdown_remote_interface,
+        enable_remote_interface,
+        confirm_action,
+        cancel_action,
+    ])
+    
     # Cache the tools list
     _TOOLS_CACHE = tools
     return tools
@@ -357,6 +572,7 @@ def get_tools_description() -> str:
         "Monitoring": ["get_connections", "measure_latency", "get_bandwidth_stats"],
         "Device Management": ["list_devices", "get_device_details", "add_device", "remove_device", "get_infrastructure_summary", "find_device_by_ip"],
         "Knowledge Base": ["search_knowledge", "add_knowledge", "get_knowledge_stats", "initialize_knowledge_base"],
+        "Interface Management (High-Risk)": ["disable_local_interface", "enable_local_interface", "shutdown_remote_interface", "enable_remote_interface", "confirm_action", "cancel_action"],
     }
     
     for category, tool_names in categories.items():
