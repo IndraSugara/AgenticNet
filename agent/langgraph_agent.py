@@ -7,7 +7,7 @@ Implements a graph-based agent workflow using LangGraph with:
 - Memory checkpointing for conversation persistence
 - Streaming support for real-time responses
 """
-from typing import TypedDict, Annotated, List, Literal, Optional
+from typing import TypedDict, Annotated, List, Optional
 from dataclasses import dataclass
 import json
 
@@ -133,17 +133,6 @@ def create_agent_node(llm_with_tools):
     return agent_node
 
 
-def should_continue(state: AgentState) -> Literal["tools", "__end__"]:
-    """Determine if we should continue to tools or end"""
-    messages = state["messages"]
-    last_message = messages[-1]
-    
-    # If LLM made tool calls, continue to tools node
-    if hasattr(last_message, "tool_calls") and last_message.tool_calls:
-        return "tools"
-    
-    # Otherwise end
-    return "__end__"
 
 
 # ============= GRAPH BUILDER =============
@@ -173,16 +162,9 @@ def build_agent_graph(checkpointer=None):
     graph.add_node("agent", create_agent_node(llm_with_tools))
     graph.add_node("tools", tool_node)
     
-    # Add edges
+    # Add edges: START -> agent, agent -> tools_condition -> tools or END
     graph.add_edge(START, "agent")
-    graph.add_conditional_edges(
-        "agent",
-        should_continue,
-        {
-            "tools": "tools",
-            "__end__": END
-        }
-    )
+    graph.add_conditional_edges("agent", tools_condition)
     graph.add_edge("tools", "agent")
     
     # Compile with checkpointer
@@ -228,8 +210,11 @@ class NetworkAgent:
         self._default_thread = "default"
     
     def _get_config(self, thread_id: str = None) -> dict:
-        """Get config with thread ID for memory"""
-        return {"configurable": {"thread_id": thread_id or self._default_thread}}
+        """Get config with thread ID for memory and recursion limit"""
+        return {
+            "configurable": {"thread_id": thread_id or self._default_thread},
+            "recursion_limit": 25
+        }
     
     def invoke(self, query: str, thread_id: str = None) -> str:
         """

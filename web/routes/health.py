@@ -6,9 +6,9 @@ Endpoints for system health checks, metrics, and network monitoring.
 from fastapi import APIRouter
 import asyncio
 import time
+import httpx
 
 from config import config
-from agent.llm_client import llm_client
 from modules.monitoring import monitoring
 from modules.security import security
 from tools.network_tools import network_tools
@@ -30,7 +30,7 @@ async def update_health_cache():
     """Update the health cache asynchronously"""
     global _health_cache
     try:
-        ollama_ok = await llm_client.check_connection_async(use_cache=False)
+        ollama_ok = await _check_ollama_connection()
         _health_cache.update({
             "status": "healthy" if ollama_ok else "degraded",
             "ollama_connected": ollama_ok,
@@ -45,6 +45,16 @@ async def update_health_cache():
             "error": str(e),
             "last_check": time.time()
         })
+
+
+async def _check_ollama_connection() -> bool:
+    """Check if Ollama is running by pinging /api/tags"""
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get(f"{config.OLLAMA_HOST}/api/tags")
+            return resp.status_code == 200
+    except Exception:
+        return False
 
 
 def get_health_cache():
@@ -206,4 +216,9 @@ async def analyze_config(config_text: str, device_type: str = "generic"):
 @router.get("/llm/info")
 async def get_llm_info():
     """Get current LLM provider information"""
-    return llm_client.get_provider_info()
+    return {
+        "provider": "ollama",
+        "model": config.OLLAMA_MODEL,
+        "host": config.OLLAMA_HOST,
+        "connected": _health_cache.get("ollama_connected", False)
+    }

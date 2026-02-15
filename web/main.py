@@ -18,7 +18,6 @@ import asyncio
 import os
 
 from config import config
-from tools.tool_registry import registry as tool_registry
 from modules.monitoring import monitoring
 
 # LangGraph Agent (primary - required)
@@ -51,8 +50,7 @@ async def lifespan(app: FastAPI):
     else:
         print(f"⚠️ Ollama not available at startup")
     
-    # Log tool count from registry
-    print(f"🔧 Tool Registry: {len(tool_registry.get_tool_names())} tools available")
+    print(f"🔧 LangGraph Tools: {len(get_all_tools())} tools available")
     
     # Start background tasks
     health_task = asyncio.create_task(health_routes.health_check_background_task())

@@ -10,16 +10,11 @@ import asyncio
 import json
 
 from config import config
-from agent.llm_client import llm_client
-from agent.transparency import transparency
 from agent.langgraph_agent import network_agent as langgraph_agent
 from web.websocket_manager import ws_manager
 from modules.monitoring import monitoring
 
 router = APIRouter()
-
-# LangGraph availability flag
-LANGGRAPH_AVAILABLE = True
 
 
 # --- Request/Response Models ---
@@ -61,7 +56,8 @@ async def query_agent(request: QueryRequest):
     try:
         from web.routes.health import _health_cache
         if not _health_cache.get("ollama_connected", False):
-            connected = await llm_client.check_connection_async(use_cache=True)
+            from web.routes.health import _check_ollama_connection
+            connected = await _check_ollama_connection()
             if not connected:
                 return QueryResponse(
                     success=False,
@@ -94,9 +90,6 @@ async def query_agent(request: QueryRequest):
 @router.post("/agent/conversations/query")
 async def query_with_thread(request: ConversationQueryRequest):
     """Send a query with a specific thread ID for conversation memory."""
-    if not LANGGRAPH_AVAILABLE or not langgraph_agent:
-        return await query_agent(QueryRequest(query=request.query))
-    
     try:
         response_text = await langgraph_agent.ainvoke(request.query, request.thread_id)
         return {
@@ -200,19 +193,10 @@ async def websocket_metrics(websocket: WebSocket):
 
 # --- History & Conversation Endpoints ---
 
-@router.get("/agent/history")
-async def get_history(limit: int = 10):
-    """Get decision history (legacy ODRVA)"""
-    history = transparency.get_history(limit)
-    return {"count": len(history), "decisions": [d.to_dict() for d in history]}
-
 
 @router.get("/agent/conversations/{thread_id}")
 async def get_conversation_history(thread_id: str):
     """Get conversation history for a specific thread."""
-    if not LANGGRAPH_AVAILABLE or not langgraph_agent:
-        return {"success": False, "error": "LangGraph not available"}
-    
     history = langgraph_agent.get_history(thread_id)
     return {
         "success": True,
@@ -226,12 +210,18 @@ async def get_conversation_history(thread_id: str):
 async def clear_conversation(thread_id: str):
     """Clear conversation history for a thread."""
     try:
+        langgraph_agent.clear_history(thread_id)
+    except Exception as e:
+        print(f"Error clearing LangGraph history: {e}")
+    
+    # Also clear from SQLite if present
+    try:
         import aiosqlite
         async with aiosqlite.connect("data/chat_history.db") as db:
             await db.execute("DELETE FROM messages WHERE thread_id = ?", (thread_id,))
             await db.commit()
-    except Exception as e:
-        print(f"Error clearing history: {e}")
+    except Exception:
+        pass
     
     return {"success": True, "message": f"Conversation '{thread_id}' cleared"}
 

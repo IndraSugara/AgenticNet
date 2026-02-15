@@ -1,19 +1,18 @@
 """
 Workflow Routes
 
-Endpoints for agentic workflow creation, execution, and history.
+Endpoints for:
+- Direct tool execution
+- Pending high-risk action management
+- Goal-based workflow execution via LangGraph agent
 """
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException
 from pydantic import BaseModel
-from typing import Optional, List
+from typing import Optional
 import asyncio
 import json
 
-from agent.llm_client import llm_client
-from agent.workflow import Workflow, save_workflow, get_workflow_history, get_workflow_by_id
-from agent.planner import planner
-from agent.executor import execute_tool
-from agent.memory import memory
+from agent.langgraph_agent import network_agent
 from tools.network_tools import network_tools
 
 router = APIRouter()
@@ -28,14 +27,14 @@ class ToolRequest(BaseModel):
 
 class WorkflowRequest(BaseModel):
     goal: str
+    thread_id: str = "workflow"
 
 
 class WorkflowResponse(BaseModel):
-    workflow_id: str
+    success: bool
     goal: str
-    status: str
-    steps: list
-    result: Optional[dict] = None
+    response: str
+    timing: Optional[dict] = None
 
 
 # --- Tool Execution ---
@@ -120,96 +119,45 @@ async def cancel_pending_action(action_id: str):
     return pending_store.cancel(action_id)
 
 
-# --- Workflow Endpoints ---
+# --- Workflow Endpoints (via LangGraph Agent) ---
 
 @router.post("/workflow/create")
 async def create_workflow(request: WorkflowRequest):
-    """Create and execute an agentic workflow from a goal"""
+    """
+    Execute a goal using the LangGraph agent.
+    
+    The agent autonomously decides which tools to call based on the goal.
+    """
     try:
         from web.routes.health import _health_cache
         if not _health_cache.get("ollama_connected", False):
-            connected = await llm_client.check_connection_async(use_cache=True)
+            from web.routes.health import _check_ollama_connection
+            connected = await _check_ollama_connection()
             if not connected:
                 return {"success": False, "error": "Ollama tidak terhubung. Pastikan Ollama sudah berjalan."}
         
-        workflow = await planner.plan(request.goal)
-        workflow.set_tool_executor(execute_tool)
-        result = await workflow.execute()
-        
-        save_workflow(workflow)
-        memory.remember("workflow", {
-            "goal": request.goal,
-            "success": result.success,
-            "steps_completed": result.completed_steps,
-            "duration": result.duration_seconds
-        })
-        
-        if result.success:
-            memory.learn_from_success(
-                goal=request.goal,
-                steps=[s.name for s in workflow.steps],
-                tools=[s.tool for s in workflow.steps]
-            )
+        response_text = await network_agent.ainvoke(request.goal, request.thread_id)
         
         return {
             "success": True,
-            "workflow_id": workflow.id,
             "goal": request.goal,
-            "status": workflow.status.value,
-            "result": result.to_dict(),
-            "steps": [s.to_dict() for s in workflow.steps]
+            "response": response_text,
+            "timing": {"mode": "langgraph"}
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
 
 
-@router.get("/workflow/list/history")
-async def list_workflow_history(limit: int = 10):
-    """Get list of past workflows"""
-    workflows = get_workflow_history(limit)
-    return {
-        "count": len(workflows),
-        "workflows": [{
-            "id": w.id,
-            "goal": w.goal,
-            "status": w.status.value,
-            "created_at": w.created_at,
-            "completed_at": w.completed_at,
-            "steps_count": len(w.steps)
-        } for w in workflows]
-    }
-
-
-@router.get("/workflow/memory/stats")
-async def get_memory_stats():
-    """Get workflow memory statistics"""
-    return memory.get_stats()
-
-
-@router.get("/workflow/{workflow_id}")
-async def get_workflow_status(workflow_id: str):
-    """Get status of a specific workflow"""
-    workflow = get_workflow_by_id(workflow_id)
-    if not workflow:
-        raise HTTPException(status_code=404, detail="Workflow not found")
-    return workflow.to_dict()
-
-
 @router.post("/workflow/quick")
 async def quick_workflow(request: WorkflowRequest):
-    """Quick workflow execution for simple goals"""
+    """Quick workflow execution — same as create but lighter response"""
     try:
-        workflow = await planner.plan(request.goal)
-        workflow.set_tool_executor(execute_tool)
-        result = await workflow.execute()
-        save_workflow(workflow)
+        response_text = await network_agent.ainvoke(request.goal, request.thread_id)
         
         return {
             "success": True,
-            "mode": "workflow",
-            "workflow_id": workflow.id,
-            "summary": result.summary,
-            "duration_seconds": result.duration_seconds
+            "mode": "langgraph",
+            "summary": response_text
         }
     except Exception as e:
         return {"success": False, "error": str(e)}
@@ -217,45 +165,30 @@ async def quick_workflow(request: WorkflowRequest):
 
 @router.websocket("/workflow/stream")
 async def stream_workflow(websocket: WebSocket):
-    """WebSocket endpoint for streaming workflow execution with progress updates"""
+    """WebSocket endpoint for streaming workflow execution via LangGraph agent"""
     await websocket.accept()
-    
-    async def progress_callback(workflow_id: str, step_id: str, status: str):
-        try:
-            await websocket.send_json({
-                "type": "progress",
-                "workflow_id": workflow_id,
-                "step_id": step_id,
-                "status": status
-            })
-        except:
-            pass
     
     try:
         while True:
             data = await websocket.receive_text()
             message = json.loads(data)
             goal = message.get("goal", "")
+            thread_id = message.get("thread_id", "workflow")
             
-            await websocket.send_json({"type": "status", "phase": "planning"})
+            await websocket.send_json({"type": "status", "phase": "processing"})
             
-            workflow = await planner.plan(goal)
-            workflow.set_tool_executor(execute_tool)
-            workflow.set_progress_callback(progress_callback)
-            
-            await websocket.send_json({
-                "type": "planned",
-                "workflow_id": workflow.id,
-                "steps": [s.to_dict() for s in workflow.steps]
-            })
-            
-            await websocket.send_json({"type": "status", "phase": "executing"})
-            result = await workflow.execute()
-            save_workflow(workflow)
+            full_response = ""
+            async for chunk in network_agent.astream(goal, thread_id):
+                full_response += chunk
+                await websocket.send_json({
+                    "type": "chunk",
+                    "content": chunk
+                })
             
             await websocket.send_json({
                 "type": "complete",
-                "result": result.to_dict()
+                "response": full_response,
+                "timing": {"mode": "langgraph_stream"}
             })
     except WebSocketDisconnect:
         pass
