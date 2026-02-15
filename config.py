@@ -25,6 +25,16 @@ class Config:
             "name": "GLM 4.7 Flash",
             "model_id": "glm-4.7-flash:latest",
             "description": "Faster responses, lower resource usage"
+        },
+        "kimi-k2-thinking:cloud": {
+            "name": "Kimi K2 Thinking",
+            "model_id": "kimi-k2-thinking:cloud",
+            "description": "Cloud-based thinking model with advanced reasoning"
+        },
+        "kimi-k2.5:cloud": {
+            "name": "Kimi K2.5",
+            "model_id": "kimi-k2.5:cloud",
+            "description": "Cloud-based thinking model with advanced reasoning"
         }
     }
     DEFAULT_MODEL: str = os.getenv("DEFAULT_MODEL", "gpt-oss:20b")

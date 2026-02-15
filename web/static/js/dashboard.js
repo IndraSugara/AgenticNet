@@ -1175,9 +1175,14 @@ async function sendMessage() {
         if (data.success) {
             addMessage(data.response, 'agent');
             
-            // Check for high-risk confirmation pattern
-            const actionIdMatch = data.response.match(/Action ID\s*:\s*([a-f0-9-]+)/i);
-            if (data.response.includes('KONFIRMASI DIPERLUKAN') && actionIdMatch) {
+            // Check for high-risk confirmation pattern in agent response text
+            const actionIdMatch = data.response.match(/Action ID\s*:\s*([\w-]+)/i);
+            if (actionIdMatch && (
+                data.response.includes('KONFIRMASI DIPERLUKAN') ||
+                data.response.includes('PENDING_CONFIRMATION') ||
+                data.response.includes('HIGH-RISK') ||
+                data.response.includes('confirm_action')
+            )) {
                 const actionId = actionIdMatch[1].trim();
                 handleHighRiskConfirmation(actionId, data.response);
             }
@@ -1200,9 +1205,13 @@ async function sendMessage() {
  * Appends confirm/cancel buttons directly inside the chat message
  */
 function handleHighRiskConfirmation(actionId, responseText) {
-    // Extract action description from response
-    const aksiMatch = responseText.match(/Aksi\s*:\s*(.+)/);
-    const risikoMatch = responseText.match(/Risiko\s*:\s*(.+)/);
+    // Extract action description from response (try multiple patterns)
+    const aksiMatch = responseText.match(/Aksi\s*:\s*(.+)/i)
+        || responseText.match(/Type\s*:\s*(.+)/i)
+        || responseText.match(/Action\s*:\s*(.+)/i);
+    const risikoMatch = responseText.match(/Risiko\s*:\s*(.+)/i)
+        || responseText.match(/Risk\s*:\s*(.+)/i)
+        || responseText.match(/Impact\s*:\s*(.+)/i);
     
     const aksi = aksiMatch ? aksiMatch[1].trim() : 'Aksi high-risk';
     const risiko = risikoMatch ? risikoMatch[1].trim() : 'Tinggi';
@@ -1228,6 +1237,10 @@ function handleHighRiskConfirmation(actionId, responseText) {
                     <div class="confirm-row">
                         <span class="confirm-label">Risiko:</span>
                         <span class="confirm-value risk-high">${risiko}</span>
+                    </div>
+                    <div class="confirm-row">
+                        <span class="confirm-label">Action ID:</span>
+                        <span class="confirm-value"><code>${actionId}</code></span>
                     </div>
                 </div>
                 <div class="confirm-actions" id="confirm-actions-${actionId}">
@@ -1263,7 +1276,7 @@ async function confirmHighRiskAction(actionId) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                query: `Ya, saya konfirmasi. Jalankan confirm_action dengan action_id "${actionId}"`, 
+                query: `[SYSTEM INSTRUCTION] User telah mengkonfirmasi aksi. Panggil tool confirm_action sekarang dengan parameter action_id="${actionId}". JANGAN panggil tool lain. JANGAN buat konfirmasi baru. HANYA panggil confirm_action(action_id="${actionId}").`, 
                 thread_id: currentThreadId 
             })
         });
@@ -1309,7 +1322,7 @@ async function cancelHighRiskAction(actionId) {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ 
-                query: `Batalkan. Jalankan cancel_action dengan action_id "${actionId}"`, 
+                query: `[SYSTEM INSTRUCTION] User telah membatalkan aksi. Panggil tool cancel_action sekarang dengan parameter action_id="${actionId}". JANGAN panggil tool lain. HANYA panggil cancel_action(action_id="${actionId}").`, 
                 thread_id: currentThreadId 
             })
         });
@@ -1352,6 +1365,38 @@ function addMessage(content, type) {
     chatMessages.appendChild(div);
     chatMessages.scrollTop = chatMessages.scrollHeight;
 }
+
+// ============= COPY AS JSON =============
+// When user selects chat content and presses Ctrl+C, copy as JSON format
+chatMessages.addEventListener('copy', function(e) {
+    const selection = window.getSelection();
+    if (!selection || selection.isCollapsed) return;
+    
+    // Find all message elements that overlap with the selection
+    const range = selection.getRangeAt(0);
+    const allMessages = chatMessages.querySelectorAll('.message');
+    const selectedMessages = [];
+    
+    allMessages.forEach(msg => {
+        // Check if this message intersects with the selection
+        if (range.intersectsNode(msg)) {
+            const role = msg.classList.contains('user') ? 'user' : 'agent';
+            const contentEl = msg.querySelector('.message-content');
+            if (contentEl) {
+                const content = contentEl.textContent.trim();
+                if (content) {
+                    selectedMessages.push({ role, content });
+                }
+            }
+        }
+    });
+    
+    if (selectedMessages.length > 0) {
+        e.preventDefault();
+        const json = JSON.stringify(selectedMessages, null, 2);
+        e.clipboardData.setData('text/plain', json);
+    }
+});
 
 function formatMarkdown(text) {
     // Basic markdown formatting

@@ -82,14 +82,35 @@ SYSTEM_PROMPT = """Kamu adalah AI Network Agent (NetOps Sentinel) yang PRAKTIS d
 - recall_similar_solutions: Cari solusi serupa
 - set_user_preference: Simpan preferensi
 
-## ⚠️ ATURAN KONFIRMASI HIGH-RISK (SANGAT PENTING)
-Ketika tool high-risk (disable/enable interface) dipanggil, tool akan mengembalikan pesan konfirmasi dengan "Action ID".
+## ⚠️ ATURAN KONFIRMASI HIGH-RISK (SANGAT PENTING — WAJIB DIPATUHI)
+Ketika tool high-risk (disable/enable interface) dipanggil, tool akan mengembalikan pesan konfirmasi.
 
-**ATURAN WAJIB:**
-1. **TAMPILKAN output tool PERSIS seperti aslinya** tanpa diubah, termasuk Action ID
-2. **JANGAN menambahkan konfirmasi sendiri** (seperti "Reply with YES/NO") — sistem sudah handle
-3. Ketika user bilang "ya"/"yes"/"lanjutkan"/"konfirmasi", LANGSUNG panggil tool `confirm_action` dengan action_id yang diberikan
-4. Ketika user bilang "tidak"/"no"/"batal", LANGSUNG panggil tool `cancel_action` dengan action_id
+**ATURAN WAJIB — JANGAN DILANGGAR:**
+1. **SALIN output tool PERSIS seperti aslinya** — JANGAN diubah, dirangkum, atau diparafrase
+2. **JANGAN mengganti Action ID** — Action ID dari tool adalah kode unik sistem (contoh: `a1b2c3d4`). JANGAN buat ID sendiri seperti `NETOP-xxx`
+3. **JANGAN menambahkan konfirmasi sendiri** — sistem sudah handle konfirmasi
+4. Ketika user bilang "ya"/"yes"/"lanjutkan"/"konfirmasi", LANGSUNG panggil tool `confirm_action` dengan action_id yang diberikan
+5. Ketika user bilang "tidak"/"no"/"batal", LANGSUNG panggil tool `cancel_action` dengan action_id
+
+**KHUSUS [SYSTEM INSTRUCTION]:**
+- Jika pesan user mengandung `[SYSTEM INSTRUCTION]` dan `confirm_action` dengan action_id tertentu → LANGSUNG panggil tool `confirm_action` dengan action_id tersebut. JANGAN panggil tool lain!
+- Jika pesan user mengandung `[SYSTEM INSTRUCTION]` dan `cancel_action` dengan action_id tertentu → LANGSUNG panggil tool `cancel_action` dengan action_id tersebut. JANGAN panggil tool lain!
+- Pesan `[SYSTEM INSTRUCTION]` berarti user SUDAH konfirmasi melalui UI button. JANGAN tanya ulang. JANGAN buat konfirmasi baru.
+
+**CONTOH OUTPUT YANG BENAR** (salin persis dari tool):
+```
+⚠️ KONFIRMASI DIPERLUKAN
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Aksi      : Mematikan interface 'ethernet 2'
+Risiko    : TINGGI - Koneksi jaringan akan terputus
+Action ID : a1b2c3d4
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+```
+
+**DILARANG:**
+- Mengubah format, mengganti Action ID, atau menambahkan teks konfirmasi sendiri
+- Memanggil disable_local_interface/enable_local_interface LAGI saat user bilang "ya" (itu membuat konfirmasi baru!)
+- Mengabaikan action_id yang diberikan user
 
 ## Aturan Umum
 1. SELALU gunakan tool yang sesuai untuk pertanyaan teknis
@@ -101,7 +122,7 @@ Ketika tool high-risk (disable/enable interface) dipanggil, tool akan mengembali
 ## Format Respons
 - Untuk hasil tool: tampilkan output dengan format rapi
 - Untuk DIAGRAM ASCII: TAMPILKAN LANGSUNG, jangan diringkas
-- Untuk KONFIRMASI HIGH-RISK: TAMPILKAN OUTPUT TOOL LANGSUNG tanpa modifikasi
+- Untuk KONFIRMASI HIGH-RISK: **COPY-PASTE output tool tanpa modifikasi apapun**
 - Untuk penjelasan: maksimal 2-3 paragraf
 - Gunakan emoji: ✅ berhasil, ❌ gagal, ⚠️ warning
 """
@@ -109,8 +130,13 @@ Ketika tool high-risk (disable/enable interface) dipanggil, tool akan mengembali
 
 # ============= GRAPH NODES =============
 
-def create_agent_node(llm_with_tools):
-    """Create the main agent node that calls LLM"""
+def create_agent_node(llm_with_tools, llm_base=None):
+    """Create the main agent node that calls LLM
+    
+    Args:
+        llm_with_tools: LLM with tools bound (or plain LLM if no tools)
+        llm_base: Optional base LLM without tools for fallback
+    """
     
     def agent_node(state: AgentState) -> AgentState:
         """Process messages and generate response or tool calls"""
@@ -125,6 +151,19 @@ def create_agent_node(llm_with_tools):
             response = llm_with_tools.invoke(messages)
             return {"messages": [response]}
         except Exception as e:
+            error_str = str(e).lower()
+            
+            # If model doesn't support tool calling schema, retry without tools
+            if llm_base and ("json schema" in error_str or "schema" in error_str or "tool" in error_str):
+                logger.warning(f"⚠️ Model rejected tool schema, retrying without tools: {e}")
+                try:
+                    response = llm_base.invoke(messages)
+                    return {"messages": [response]}
+                except Exception as e2:
+                    logger.error(f"Fallback also failed: {e2}", exc_info=True)
+                    error_msg = f"⚠️ Maaf, terjadi error saat memproses: {str(e2)}"
+                    return {"messages": [AIMessage(content=error_msg)]}
+            
             # Log error with stack trace for debugging
             logger.error(f"Agent error processing message: {e}", exc_info=True)
             error_msg = f"⚠️ Maaf, terjadi error saat memproses: {str(e)}"
@@ -150,22 +189,33 @@ def build_agent_graph(checkpointer=None):
     # Get LLM and tools
     tools = get_all_tools()
     llm = get_llm()
-    llm_with_tools = llm.bind_tools(tools)
     
-    # Create tool node
-    tool_node = ToolNode(tools)
+    # Try to bind tools - some models don't support function calling
+    try:
+        llm_with_tools = llm.bind_tools(tools)
+        supports_tools = True
+        logger.info(f"✅ Model supports tool calling ({len(tools)} tools bound)")
+    except Exception as e:
+        logger.warning(f"⚠️ Model doesn't support tool binding, running chat-only mode: {e}")
+        llm_with_tools = llm
+        supports_tools = False
     
     # Build graph
     graph = StateGraph(AgentState)
     
-    # Add nodes
-    graph.add_node("agent", create_agent_node(llm_with_tools))
-    graph.add_node("tools", tool_node)
-    
-    # Add edges: START -> agent, agent -> tools_condition -> tools or END
-    graph.add_edge(START, "agent")
-    graph.add_conditional_edges("agent", tools_condition)
-    graph.add_edge("tools", "agent")
+    if supports_tools:
+        # Full agent with tool calling
+        tool_node = ToolNode(tools)
+        graph.add_node("agent", create_agent_node(llm_with_tools, llm_base=llm))
+        graph.add_node("tools", tool_node)
+        graph.add_edge(START, "agent")
+        graph.add_conditional_edges("agent", tools_condition)
+        graph.add_edge("tools", "agent")
+    else:
+        # Chat-only mode (no tools) for models that don't support function calling
+        graph.add_node("agent", create_agent_node(llm_with_tools))
+        graph.add_edge(START, "agent")
+        graph.add_edge("agent", END)
     
     # Compile with checkpointer
     return graph.compile(checkpointer=checkpointer)
