@@ -17,26 +17,21 @@ graph TB
     
     subgraph "API Layer"
         FASTAPI[FastAPI Server<br/>web/main.py]
-        REST[REST Endpoints]
+        ROUTES[Modular Routes<br/>web/routes/]
         WSS[WebSocket Manager]
     end
     
     subgraph "Agent Layer"
         LANGGRAPH[LangGraph Agent<br/>langgraph_agent.py]
-        LLM[Ollama LLM Client]
+        LLM[ChatOllama LLM<br/>langchain_llm.py]
         TOOLS[LangChain Tools]
-    end
-    
-    subgraph "Memory Layer"
-        STM[Short-Term Memory<br/>workflow_memory.db]
-        LTM[Long-Term Memory<br/>long_term_memory.db]
-        CHAT[Chat History<br/>chat_history.db]
+        MEMORY[LangGraph Memory<br/>langgraph_memory.py]
     end
     
     subgraph "Tools Layer"
-        REGISTRY[Tool Registry]
         NETWORK[Network Tools]
         DEVICE[Device Tools]
+        PENDING[Pending Actions]
         VENDOR[Vendor Drivers]
     end
     
@@ -45,6 +40,9 @@ graph TB
         SECURITY[Security Module]
         GUARDRAILS[Guardrails Module]
         INVENTORY[Inventory Module]
+        INFRA[Infrastructure Manager]
+        ALERT[Alert Manager]
+        SCHED[Scheduler]
     end
     
     subgraph "Data Layer"
@@ -54,25 +52,25 @@ graph TB
     
     WEB --> FASTAPI
     WS --> WSS
-    FASTAPI --> LANGGRAPH
+    FASTAPI --> ROUTES
+    ROUTES --> LANGGRAPH
     LANGGRAPH --> LLM
     LANGGRAPH --> TOOLS
-    LANGGRAPH --> STM
-    LANGGRAPH --> LTM
-    LANGGRAPH --> CHAT
-    TOOLS --> REGISTRY
+    LANGGRAPH --> MEMORY
     TOOLS --> NETWORK
     TOOLS --> DEVICE
-    TOOLS --> VENDOR
-    LANGGRAPH --> MONITOR
-    LANGGRAPH --> SECURITY
-    LANGGRAPH --> GUARDRAILS
-    DEVICE --> INVENTORY
-    STM --> SQLITE
-    LTM --> SQLITE
-    CHAT --> SQLITE
+    TOOLS --> PENDING
+    DEVICE --> VENDOR
+    ROUTES --> MONITOR
+    ROUTES --> SECURITY
+    ROUTES --> GUARDRAILS
+    ROUTES --> INFRA
+    ROUTES --> ALERT
+    INFRA --> SCHED
     MONITOR --> SQLITE
     INVENTORY --> SQLITE
+    MEMORY --> SQLITE
+    ALERT --> SQLITE
 ```
 
 ---
@@ -81,54 +79,71 @@ graph TB
 
 ```
 agenticNet/
-├── main.py                 # Entry point aplikasi
-├── config.py               # Konfigurasi global
-├── requirements.txt        # Dependencies
-├── .env.example            # Template environment variables
+├── main.py                        # Entry point aplikasi
+├── config.py                      # Konfigurasi global
+├── requirements.txt               # Dependencies
+├── .env.example                   # Template environment variables
 │
-├── agent/                  # Core AI Agent
-│   ├── langgraph_agent.py  # LangGraph agent utama
-│   ├── llm_client.py       # Ollama LLM client
-│   ├── memory.py           # Short-term workflow memory
-│   ├── long_term_memory.py # Long-term memory + solutions
-│   ├── chat_history.py     # Conversation persistence
-│   ├── langchain_tools.py  # LangChain tool wrappers
-│   ├── langchain_*_tools.py # Kategori tools spesifik
-│   ├── workflow.py         # Workflow execution engine
-│   ├── planner.py          # Multi-step planning
-│   ├── scheduler.py        # Scheduled task execution
-│   ├── network_topology.py # Network topology mapping
-│   ├── rag_knowledge.py    # RAG knowledge base
-│   └── report_generator.py # Laporan otomatis
+├── agent/                         # Core AI Agent
+│   ├── langgraph_agent.py         # LangGraph agent utama (NetworkAgent)
+│   ├── langchain_llm.py           # ChatOllama LLM wrapper
+│   ├── langgraph_memory.py        # LangGraph memory checkpointer
+│   ├── langchain_tools.py         # LangChain tool wrappers utama
+│   ├── langchain_device_tools.py  # Device management tools
+│   ├── langchain_backup_tools.py  # Config backup tools
+│   ├── langchain_memory_tools.py  # Memory management tools
+│   ├── langchain_rag_tools.py     # RAG knowledge tools
+│   ├── langchain_report_tools.py  # Report generation tools
+│   ├── langchain_scheduler_tools.py # Scheduler & alert tools
+│   ├── langchain_topology_tools.py  # Network topology tools
+│   ├── infrastructure.py          # Infrastructure device manager
+│   ├── alerting.py                # Alert manager & notifications
+│   ├── scheduler.py               # Scheduled task execution
+│   ├── long_term_memory.py        # Long-term memory + solutions
+│   ├── network_topology.py        # Network topology mapping
+│   ├── rag_knowledge.py           # RAG knowledge base
+│   ├── report_generator.py        # Laporan otomatis
+│   ├── config_backup.py           # Config backup manager
+│   └── logging_config.py          # Structured logging
 │
-├── modules/                # Modul Fungsional
-│   ├── monitoring.py       # System & network monitoring
-│   ├── inventory.py        # Device inventory management
-│   ├── security.py         # Security & compliance
-│   └── guardrails.py       # Risk assessment & approval
+├── modules/                       # Modul Fungsional
+│   ├── monitoring.py              # System & network monitoring
+│   ├── inventory.py               # Device inventory management
+│   ├── security.py                # Security & compliance
+│   └── guardrails.py              # Risk assessment & approval
 │
-├── tools/                  # Network Tools
-│   ├── network_tools.py    # Diagnostic tools (ping, traceroute, etc)
-│   ├── tool_registry.py    # Unified tool registration
-│   ├── vendor_drivers.py   # Multi-vendor device drivers
-│   └── unified_commands.py # Cross-vendor command abstraction
+├── tools/                         # Network Tools
+│   ├── network_tools.py           # Diagnostic tools (ping, traceroute, etc)
+│   ├── pending_actions.py         # High-risk action confirmation store
+│   ├── vendor_drivers.py          # Multi-vendor device drivers
+│   └── unified_commands.py        # Cross-vendor command abstraction
 │
-├── web/                    # Web Interface
-│   ├── main.py             # FastAPI application
-│   ├── websocket_manager.py # WebSocket handling
-│   ├── templates/          # Jinja2 templates
-│   └── static/             # CSS, JS, assets
+├── web/                           # Web Interface
+│   ├── main.py                    # FastAPI application (modular)
+│   ├── websocket_manager.py       # WebSocket connection manager
+│   ├── routes/                    # Modular route handlers
+│   │   ├── health.py              # Health, metrics, network endpoints
+│   │   ├── chat.py                # Chat, streaming, conversation endpoints
+│   │   ├── models.py              # LLM model management
+│   │   ├── workflows.py           # Tool execution & workflows
+│   │   ├── infrastructure.py      # Infrastructure & alert management
+│   │   ├── devices.py             # Device commands & inventory
+│   │   └── guardrails.py          # Human-in-the-loop approval
+│   ├── templates/                 # Jinja2 templates
+│   └── static/                    # CSS, JS, assets
 │       ├── css/
 │       └── js/
 │
-└── data/                   # Persistent Data
-    ├── chat_history.db     # Conversation history
-    ├── workflow_memory.db  # Workflow memory
-    ├── long_term_memory.db # Solutions & patterns
-    ├── inventory.db        # Device inventory
-    ├── metrics.db          # System metrics history
-    ├── config_backups.db   # Configuration backups
-    └── chroma_db/          # Vector embeddings (RAG)
+└── data/                          # Persistent Data
+    ├── conversations.db           # LangGraph conversation checkpoints
+    ├── chat_history.db            # Chat history (SQLite)
+    ├── workflow_memory.db         # Workflow memory
+    ├── long_term_memory.db        # Solutions & patterns
+    ├── inventory.db               # Device inventory
+    ├── metrics.db                 # System metrics history
+    ├── config_backups.db          # Configuration backups
+    ├── reports/                   # Generated reports
+    └── chroma_db/                 # Vector embeddings (RAG)
 ```
 
 ---
@@ -137,22 +152,26 @@ agenticNet/
 
 ### 1. Entry Point & Konfigurasi
 
-#### [main.py](file:///c:/Users/ASUS/agenticNet/main.py)
+#### main.py
 Entry point aplikasi yang menjalankan server Uvicorn:
 ```python
 uvicorn.run("web.main:app", host=config.HOST, port=config.PORT, reload=config.DEBUG)
 ```
 
-#### [config.py](file:///c:/Users/ASUS/agenticNet/config.py)
+#### config.py
 Konfigurasi global termasuk:
 - **Ollama Settings**: Host, model, available models
 - **Server Settings**: Host, port, debug mode
 - **Agent Settings**: Max reasoning steps, risk threshold
-- **System Prompt**: Instruksi lengkap untuk AI agent
 
 ```python
 class Config:
     OLLAMA_HOST = "http://localhost:11434"
+    OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "DEFAULT_MODEL")
+    AVAILABLE_MODELS = {
+        "gpt-oss:20b": {...},
+        "glm-4.7-flash:latest": {...}
+    }
     DEFAULT_MODEL = "gpt-oss:20b"
     MAX_REASONING_STEPS = 10
     RISK_THRESHOLD = 0.7  # Block actions above this risk level
@@ -162,7 +181,7 @@ class Config:
 
 ### 2. LangGraph Agent
 
-#### [langgraph_agent.py](file:///c:/Users/ASUS/agenticNet/agent/langgraph_agent.py)
+#### langgraph_agent.py
 
 Implementasi agent berbasis LangGraph dengan:
 
@@ -175,8 +194,6 @@ class AgentState:
 **Graph Builder:**
 ```python
 def build_agent_graph(checkpointer=None):
-    # Build graph with nodes: agent, tools
-    # Edge logic: should_continue -> tools or END
     graph_builder = StateGraph(AgentState)
     graph_builder.add_node("agent", agent_node)
     graph_builder.add_node("tools", tool_node)
@@ -199,30 +216,43 @@ stateDiagram-v2
     End --> [*]
 ```
 
+#### langchain_llm.py
+
+Wrapper ChatOllama untuk LangGraph:
+
+```python
+def get_llm(model=None, base_url=None, temperature=0.7, timeout=45):
+    """Get LangChain ChatOllama instance"""
+    return ChatOllama(model=model or config.OLLAMA_MODEL, ...)
+
+def get_llm_with_tools(tools: list, **kwargs):
+    """Get LLM with tools bound for function calling"""
+    llm = get_llm(**kwargs)
+    return llm.bind_tools(tools)
+```
+
 ---
 
 ### 3. Memory System
 
-AgenticNet memiliki **3 lapisan memori** yang masing-masing disimpan di SQLite:
+AgenticNet menggunakan **LangGraph MemorySaver** sebagai checkpointer utama untuk conversation state, serta **Long-Term Memory** terpisah.
 
-#### 3.1 Short-Term Memory ([memory.py](file:///c:/Users/ASUS/agenticNet/agent/memory.py))
+#### 3.1 LangGraph Memory (langgraph_memory.py)
 
-Menyimpan konteks workflow saat ini:
+Mengelola conversation persistence menggunakan LangGraph checkpointer:
 
 ```python
-class WorkflowMemory:
-    def remember(type: str, content: Dict) -> str
-    def recall(query: str, limit: int) -> List[MemoryEntry]
-    def consolidate()  # Move to long-term
-    def learn_from_success(goal, steps, tools)
-    def learn_from_failure(goal, failed_step, error, recovery)
+class ConversationManager:
+    def get_thread_config(thread_id: str) -> dict
+    def list_threads() -> list
+    def clear_thread(thread_id: str) -> bool
 ```
 
-**Database**: `data/workflow_memory.db`
-- Tabel `short_term_memory`: Context saat ini
-- Tabel `long_term_memory`: Pattern yang dipelajari
+**Database**: `data/conversations.db`
+- Thread-based conversation isolation
+- MemorySaver checkpointer compatible with async/sync operations
 
-#### 3.2 Long-Term Memory ([long_term_memory.py](file:///c:/Users/ASUS/agenticNet/agent/long_term_memory.py))
+#### 3.2 Long-Term Memory (long_term_memory.py)
 
 Menyimpan solusi troubleshooting dan preferensi:
 
@@ -241,32 +271,42 @@ class LongTermMemory:
 - Tabel `preferences`: User preferences
 - Tabel `patterns`: Learned patterns
 
-#### 3.3 Chat History ([chat_history.py](file:///c:/Users/ASUS/agenticNet/agent/chat_history.py))
-
-Menyimpan percakapan per thread:
-
-**Database**: `data/chat_history.db`
-- Thread-based conversation storage
-- Persists across server restarts
-
 ---
 
 ### 4. Tool System
 
-#### 4.1 Tool Registry ([tool_registry.py](file:///c:/Users/ASUS/agenticNet/tools/tool_registry.py))
+#### 4.1 LangChain Tools (langchain_tools.py)
 
-Central registry untuk semua tools:
+File utama yang menggabungkan semua tools untuk LangGraph agent:
 
 ```python
-class ToolRegistry:
-    def register(tool: ToolDefinition)
-    def get(name: str) -> ToolDefinition
-    def execute(name: str, params: Dict) -> Dict
-    def get_langchain_tools() -> List[StructuredTool]
-    def get_schema_for_llm() -> str
+def get_all_tools():
+    """Get all tools for LangGraph agent including:
+    - Network diagnostic tools (12)
+    - Device management tools (6)
+    - RAG/Knowledge base tools (4)
+    - Scheduler/Alert tools (9)
+    """
 ```
 
-#### 4.2 Network Tools ([network_tools.py](file:///c:/Users/ASUS/agenticNet/tools/network_tools.py))
+**Kategori Tools:**
+
+| Kategori | Tools | File |
+|----------|-------|------|
+| **Connectivity** | `ping`, `traceroute`, `check_port`, `port_scan` | `langchain_tools.py` |
+| **DNS** | `dns_lookup`, `nslookup` | `langchain_tools.py` |
+| **Info** | `get_network_info`, `get_provider_info`, `get_interfaces` | `langchain_tools.py` |
+| **Monitoring** | `get_connections`, `measure_latency`, `get_bandwidth_stats` | `langchain_tools.py` |
+| **High-Risk** | `disable_local_interface`, `enable_local_interface`, `shutdown_remote_interface`, `enable_remote_interface` | `langchain_tools.py` |
+| **Confirmation** | `confirm_action`, `cancel_action` | `langchain_tools.py` |
+| **Device** | `get_device_info`, `get_cpu_memory`, `get_routing_table` | `langchain_device_tools.py` |
+| **RAG** | `search_knowledge`, `add_knowledge` | `langchain_rag_tools.py` |
+| **Scheduler** | `create_schedule`, `list_schedules`, `cancel_schedule` | `langchain_scheduler_tools.py` |
+| **Backup** | `backup_config`, `restore_config`, `list_backups` | `langchain_backup_tools.py` |
+| **Topology** | `get_topology`, `discover_neighbors` | `langchain_topology_tools.py` |
+| **Reports** | `generate_report`, `list_reports` | `langchain_report_tools.py` |
+
+#### 4.2 Network Tools (network_tools.py)
 
 **Diagnostic Tools:**
 | Tool | Fungsi |
@@ -282,28 +322,23 @@ class ToolRegistry:
 | `measure_latency(hosts)` | Latency measurement |
 | `get_bandwidth_stats()` | Bandwidth usage |
 
-#### 4.3 LangChain Tools ([langchain_tools.py](file:///c:/Users/ASUS/agenticNet/agent/langchain_tools.py))
+#### 4.3 Pending Actions (pending_actions.py)
 
-Wrapper LangChain untuk integrasi dengan LangGraph:
+Sistem konfirmasi untuk aksi berisiko tinggi:
 
 ```python
-@tool
-def ping(host: str, count: int = 4) -> str:
-    """Ping a host to check connectivity"""
-    result = network_tools.ping(host, count)
-    return result.output if result.success else f"Error: {result.error}"
+class PendingActionsStore:
+    def add(tool_name, params, description, risk_reason) -> PendingAction
+    def get(action_id) -> PendingAction
+    def confirm(action_id) -> Dict
+    def cancel(action_id) -> Dict
+    def list_pending() -> list
 ```
 
-**Kategori Tools:**
-- **Connectivity**: ping, traceroute, check_port, port_scan
-- **DNS**: dns_lookup, nslookup
-- **Info**: get_network_info, get_provider_info, get_interfaces
-- **Monitoring**: get_connections, measure_latency, get_bandwidth_stats
-- **Device**: get_device_info, get_interfaces, get_cpu_memory, get_routing_table
-- **RAG**: search_knowledge, add_knowledge
-- **Scheduler**: create_schedule, list_schedules, cancel_schedule
+- Actions auto-expire setelah 5 menit
+- Mendukung high-risk interface management (enable/disable)
 
-#### 4.4 Vendor Drivers ([vendor_drivers.py](file:///c:/Users/ASUS/agenticNet/tools/vendor_drivers.py))
+#### 4.4 Vendor Drivers (vendor_drivers.py)
 
 Multi-vendor device support:
 - Cisco IOS/NXOS
@@ -322,9 +357,59 @@ class UnifiedCommand:
 
 ---
 
-### 5. Modules
+### 5. Infrastructure & Alert System
 
-#### 5.1 Monitoring Module ([monitoring.py](file:///c:/Users/ASUS/agenticNet/modules/monitoring.py))
+#### 5.1 Infrastructure Manager (agent/infrastructure.py)
+
+Manajemen perangkat jaringan kantor:
+
+```python
+class InfrastructureManager:
+    def add_device(name, ip, device_type, ...) -> NetworkDevice
+    def remove_device(device_id) -> bool
+    def get_device(device_id) -> NetworkDevice
+    def list_devices(device_type, status) -> List
+    def update_device(device_id, **kwargs) -> NetworkDevice
+    def get_status_summary() -> Dict
+    def export_config() -> str
+    def import_config(config_json) -> int
+```
+
+**Device Types:** `router`, `switch`, `server`, `pc`, `printer`, `access_point`, `firewall`, `other`
+
+**Device Status:** `online`, `offline`, `degraded`, `unknown`
+
+#### 5.2 Alert Manager (agent/alerting.py)
+
+Sistem notifikasi multi-channel:
+
+```python
+class AlertManager:
+    def create_alert(device_id, device_name, device_ip, severity, message) -> Alert
+    def acknowledge(alert_id, by) -> bool
+    def resolve(alert_id) -> bool
+    def get_alerts(severity, device_id, unresolved_only, limit) -> List
+    def get_summary() -> Dict
+```
+
+**Alert Channels:**
+- Dashboard (WebSocket broadcast)
+- Webhook (custom URL)
+- Discord (webhook integration)
+- Telegram (bot API)
+- Email (SMTP)
+
+**Alert Severity:** `info`, `warning`, `critical`
+
+#### 5.3 Scheduler (agent/scheduler.py)
+
+Penjadwalan health check otomatis untuk perangkat terdaftar.
+
+---
+
+### 6. Modules
+
+#### 6.1 Monitoring Module (monitoring.py)
 
 Real-time system monitoring dengan psutil:
 
@@ -336,6 +421,10 @@ class MonitoringModule:
     def analyze_trend(metric_name, window_size)
     def detect_anomaly(metric: MetricPoint)
     def get_health_summary()
+    def update_network_metrics(latency, bandwidth)
+    def get_interface_details(interface_name)
+    def get_interface_history(interface_name, hours)
+    def get_metric_history(metric_name, hours)
 ```
 
 **Metrics Collected:**
@@ -349,7 +438,7 @@ class MonitoringModule:
 - Historical metrics storage
 - Interface-specific history
 
-#### 5.2 Inventory Module ([inventory.py](file:///c:/Users/ASUS/agenticNet/modules/inventory.py))
+#### 6.2 Inventory Module (inventory.py)
 
 Device inventory management:
 
@@ -378,7 +467,7 @@ class InventoryModule:
 - Supports NetBox API integration (optional)
 - SQLite fallback for local development
 
-#### 5.3 Security Module ([security.py](file:///c:/Users/ASUS/agenticNet/modules/security.py))
+#### 6.3 Security Module (security.py)
 
 Security & compliance checking:
 
@@ -401,7 +490,7 @@ class SecurityModule:
 - Unencrypted traffic
 - Missing firewall rules
 
-#### 5.4 Guardrails Module ([guardrails.py](file:///c:/Users/ASUS/agenticNet/modules/guardrails.py))
+#### 6.4 Guardrails Module (guardrails.py)
 
 Human-in-the-Loop approval workflow:
 
@@ -434,51 +523,120 @@ class CommandClassifier:
 
 ---
 
-### 6. Web Layer
+### 7. Web Layer
 
-#### 6.1 FastAPI Application ([web/main.py](file:///c:/Users/ASUS/agenticNet/web/main.py))
+#### 7.1 FastAPI Application (web/main.py)
+
+Aplikasi modular dengan route terpisah:
+
+```python
+app = FastAPI(
+    title="Agentic Network Infrastructure Operator",
+    version="2.0.0",
+    lifespan=lifespan
+)
+
+# Route modules
+app.include_router(health_routes.router)
+app.include_router(chat_routes.router)
+app.include_router(model_routes.router)
+app.include_router(workflow_routes.router)
+app.include_router(infra_routes.router)
+app.include_router(device_routes.router)
+app.include_router(guardrails_routes.router)
+```
 
 **Endpoints Overview:**
 
 | Category | Endpoint | Method | Description |
 |----------|----------|--------|-------------|
 | **Core** | `/` | GET | Dashboard |
-| | `/health` | GET | Health check |
-| | `/query` | POST | Query agent |
+| **Health** | `/health` | GET | Health check (cached) |
+| | `/monitoring/status` | GET | Monitoring status |
+| | `/monitoring/metrics` | GET | System metrics |
+| | `/monitoring/metrics/detailed` | GET | Detailed metrics |
+| | `/monitoring/trends/{metric}` | GET | Metric trend analysis |
+| | `/monitoring/interfaces/{name}` | GET | Interface details |
+| | `/monitoring/interfaces/{name}/history` | GET | Interface history |
+| | `/monitoring/history/{metric}` | GET | Metric history |
+| **Network** | `/network/interfaces` | GET | Network interfaces |
+| | `/network/connections` | GET | Active connections |
+| | `/network/latency` | GET | Latency measurement |
+| | `/network/bandwidth` | GET | Bandwidth stats |
+| **Security** | `/security/status` | GET | Security findings |
+| | `/security/analyze` | POST | Analyze config |
+| **LLM** | `/llm/info` | GET | LLM provider info |
+| **Chat** | `/query` | POST | Query agent |
+| | `/query/thread` | POST | Query with thread ID |
 | | `/stream` | WS | Stream agent response |
-| **Conversation** | `/conversation/{thread_id}` | GET | Get history |
+| | `/ws/metrics` | WS | Real-time metrics |
+| | `/conversation/{thread_id}` | GET | Get history |
 | | `/conversation/{thread_id}/clear` | POST | Clear history |
 | | `/chat/save` | POST | Save message |
-| **Model** | `/models/available` | GET | List models |
-| | `/models/current` | GET | Current model |
-| | `/models/switch` | POST | Switch model |
+| | `/chat/save-history` | POST | Save full conversation |
+| | `/chat/threads` | GET | List chat threads |
+| | `/chat/history/{thread_id}` | GET | Load chat history |
+| **Model** | `/agent/models/list` | GET | List models |
+| | `/agent/model/switch` | POST | Switch model |
+| **Tools** | `/tools/run` | POST | Run network tool |
+| | `/tools/pending` | GET | List pending actions |
+| | `/tools/confirm/{id}` | POST | Confirm action |
+| | `/tools/cancel/{id}` | POST | Cancel action |
 | **Workflow** | `/workflow/create` | POST | Create workflow |
-| | `/workflow/quick` | POST | Quick mode |
-| | `/workflow/{id}` | GET | Workflow status |
+| | `/workflow/quick` | POST | Quick workflow |
+| | `/workflow/stream` | WS | Stream workflow |
 | **Infrastructure** | `/infra/devices` | GET/POST | Device management |
 | | `/infra/devices/{id}` | GET/PUT/DELETE | Single device |
+| | `/infra/devices/{id}/status` | GET | Check device status |
+| | `/infra/summary` | GET | Infrastructure summary |
 | | `/infra/monitor/start` | POST | Start monitoring |
 | | `/infra/monitor/stop` | POST | Stop monitoring |
+| | `/infra/monitor/status` | GET | Monitoring status |
+| | `/infra/monitor/check-all` | POST | Check all devices |
 | | `/infra/alerts` | GET | Active alerts |
-| **Metrics** | `/ws/metrics` | WS | Real-time metrics |
-| | `/metrics` | GET | Current metrics |
-| | `/metrics/interface/{name}` | GET | Interface metrics |
+| | `/infra/alerts/summary` | GET | Alert summary |
+| | `/infra/alerts/{id}/acknowledge` | POST | Acknowledge alert |
+| | `/infra/alerts/{id}/resolve` | POST | Resolve alert |
+| | `/infra/live` | WS | Live infrastructure |
+| | `/infra/config/export` | GET | Export config |
+| | `/infra/config/import` | POST | Import config |
+| **Inventory** | `/inventory` | GET/POST | Inventory management |
+| | `/inventory/{device_ip}` | GET/DELETE | Single inventory device |
+| **Device** | `/device/command` | POST | Execute unified command |
+| | `/device/{ip}/interfaces` | GET | Device interfaces |
+| | `/device/{ip}/cpu-memory` | GET | Device resources |
+| | `/device/{ip}/routing` | GET | Routing table |
+| | `/device/{ip}/arp` | GET | ARP table |
+| | `/device/{ip}/logs` | GET | Device logs |
+| | `/device/{ip}/ping` | POST | Ping from device |
+| **Guardrails** | `/guardrails/plan` | POST | Create action plan |
+| | `/guardrails/pending` | GET | Pending plans |
+| | `/guardrails/approve/{id}` | POST | Approve plan |
+| | `/guardrails/reject/{id}` | POST | Reject plan |
+| | `/guardrails/validate` | POST | Validate command |
+| | `/guardrails/status` | GET | Guardrails status |
 
-#### 6.2 WebSocket Manager ([websocket_manager.py](file:///c:/Users/ASUS/agenticNet/web/websocket_manager.py))
+#### 7.2 WebSocket Manager (websocket_manager.py)
 
-Real-time communication:
+Real-time communication dengan channel-based connections:
 
 ```python
-class WSManager:
-    async def connect(websocket: WebSocket)
-    async def disconnect(websocket: WebSocket)
-    async def broadcast(message: dict)
+class ConnectionManager:
+    # Channels: metrics, notifications, chat
+    async def connect(websocket, channel="metrics")
+    def disconnect(websocket, channel="metrics")
+    async def broadcast(message, channel="metrics")
+    async def send_personal(websocket, message)
+    async def broadcast_metrics(metrics)
+    async def broadcast_notification(notification)
+    async def broadcast_alert(alert)
 ```
 
 **WebSocket Channels:**
 - `/stream` - Agent response streaming
 - `/ws/metrics` - Real-time metrics (every 5 seconds)
-- `/infra/live` - Infrastructure alerts
+- `/infra/live` - Infrastructure status updates
+- `/workflow/stream` - Workflow execution streaming
 
 ---
 
@@ -493,13 +651,11 @@ sequenceDiagram
     participant FastAPI
     participant LangGraph
     participant Tools
-    participant Memory
     participant Ollama
 
     User->>Dashboard: Send message
     Dashboard->>FastAPI: POST /query
-    FastAPI->>Memory: Load conversation history
-    FastAPI->>LangGraph: Process query
+    FastAPI->>LangGraph: process via NetworkAgent
     LangGraph->>Ollama: Generate response
     Ollama-->>LangGraph: Response + tool calls
     
@@ -510,8 +666,7 @@ sequenceDiagram
     
     LangGraph->>Ollama: Final response
     Ollama-->>LangGraph: Final answer
-    LangGraph->>Memory: Save conversation
-    LangGraph-->>FastAPI: Response
+    LangGraph-->>FastAPI: Response (via MemorySaver checkpointer)
     FastAPI-->>Dashboard: JSON response
     Dashboard-->>User: Display message
 ```
@@ -522,15 +677,14 @@ sequenceDiagram
 flowchart TD
     A[Agent receives query] --> B{Need tool?}
     B -->|No| C[Generate response]
-    B -->|Yes| D[Select tool from registry]
-    D --> E{Is command risky?}
+    B -->|Yes| D[Select tool from LangChain tools]
+    D --> E{Is action high-risk?}
     E -->|Low risk| F[Execute directly]
-    E -->|High risk| G[Create execution plan]
-    G --> H{Requires approval?}
-    H -->|Yes| I[Request user approval]
-    I -->|Approved| F
-    I -->|Denied| J[Return blocked message]
-    H -->|No| F
+    E -->|High risk| G[Create PendingAction]
+    G --> H[Return confirmation request to user]
+    H --> I{User response?}
+    I -->|confirm_action| F
+    I -->|cancel_action| J[Return cancelled message]
     F --> K[Tool returns result]
     K --> L[Add to agent context]
     L --> M{More tools needed?}
@@ -553,29 +707,29 @@ flowchart TD
     I --> C
 ```
 
+### 4. Infrastructure Monitoring Flow
+
+```mermaid
+flowchart TD
+    A[POST /infra/monitor/start] --> B[Scheduler starts]
+    B --> C[For each registered device]
+    C --> D[Ping device]
+    D --> E[Check monitored ports]
+    E --> F{Status changed?}
+    F -->|Yes| G[Update device status]
+    G --> H[Create alert via AlertManager]
+    H --> I[Notify channels: Dashboard/Discord/Telegram/Webhook]
+    F -->|No| J[Wait check_interval]
+    J --> C
+```
+
 ---
 
 ## Database Schema
 
-### 1. workflow_memory.db
+### 1. conversations.db (LangGraph Checkpointer)
 
-```sql
-CREATE TABLE short_term_memory (
-    id TEXT PRIMARY KEY,
-    type TEXT NOT NULL,
-    content TEXT NOT NULL,  -- JSON
-    timestamp TEXT NOT NULL,
-    relevance_score REAL DEFAULT 1.0
-);
-
-CREATE TABLE long_term_memory (
-    id TEXT PRIMARY KEY,
-    type TEXT NOT NULL,
-    content TEXT NOT NULL,
-    timestamp TEXT NOT NULL,
-    relevance_score REAL DEFAULT 1.0
-);
-```
+Dikelola otomatis oleh LangGraph `MemorySaver` untuk menyimpan state percakapan per thread.
 
 ### 2. long_term_memory.db
 
@@ -686,7 +840,19 @@ Command yang **selalu diblokir**:
 - `erase nvram`
 - `delete running-config`
 
-### 3. Approval Workflow
+### 3. High-Risk Action Flow (PendingActions)
+
+```mermaid
+flowchart LR
+    A[Agent calls high-risk tool] --> B[PendingAction created]
+    B --> C[Return confirmation request with action_id]
+    C --> D{User response}
+    D -->|confirm_action| E[Execute via executor]
+    D -->|cancel_action| F[Cancel operation]
+    D -->|No response 5min| G[Auto-expire]
+```
+
+### 4. Guardrails Approval Workflow
 
 ```mermaid
 flowchart LR
@@ -699,7 +865,7 @@ flowchart LR
     F -->|Denied| H[Cancel operation]
 ```
 
-### 4. Iteration Limits
+### 5. Iteration Limits
 
 - Max 5 iterations per session
 - Prevents infinite loops
@@ -720,9 +886,9 @@ PORT=8000
 DEBUG=false
 
 # Device credentials
-DEVICE_USERNAME_default=admin
-DEVICE_PASSWORD_default=secret
-DEVICE_ENABLE_default=enable_secret
+DEVICE_USERNAME=admin
+DEVICE_PASSWORD=secret
+DEVICE_ENABLE=enable_secret
 ```
 
 ### Optional Variables
@@ -732,9 +898,22 @@ DEVICE_ENABLE_default=enable_secret
 NETBOX_URL=https://netbox.example.com
 NETBOX_TOKEN=your-api-token
 
+# DeepSeek LLM Integration
+DEEPSEEK_API_KEY=your-deepseek-api-key
+DEEPSEEK_MODEL=deepseek-coder
+
 # Model options
 DEFAULT_MODEL=gpt-oss:20b
 # Or: glm-4.7-flash:latest
+
+# Per-device credentials
+DEVICE_USERNAME_CISCO=cisco_admin
+DEVICE_PASSWORD_CISCO=cisco_pass
+
+# Alert integrations
+DISCORD_WEBHOOK_URL=https://discord.com/api/webhooks/...
+TELEGRAM_BOT_TOKEN=your-bot-token
+TELEGRAM_CHAT_ID=your-chat-id
 ```
 
 ---
@@ -805,6 +984,8 @@ def my_new_tool(param1: str, param2: int = 10) -> str:
     return result.output if result.success else f"Error: {result.error}"
 ```
 
+Tambahkan ke `get_all_tools()` atau `get_network_tools()` di file yang sama.
+
 ### 2. Menambah Device Vendor
 
 Di `tools/vendor_drivers.py`:
@@ -815,7 +996,25 @@ class MyVendorDriver:
         pass
 ```
 
-### 3. Logging
+### 3. Menambah Route Baru
+
+Buat file baru di `web/routes/my_route.py`:
+```python
+from fastapi import APIRouter
+router = APIRouter()
+
+@router.get("/my-endpoint")
+async def my_endpoint():
+    return {"message": "Hello"}
+```
+
+Register di `web/main.py`:
+```python
+from web.routes import my_route
+app.include_router(my_route.router)
+```
+
+### 4. Logging
 
 Sistem menggunakan logging terstruktur:
 ```python
@@ -834,16 +1033,27 @@ logger.error("Error occurred", exc_info=True)
 - `uvicorn` - ASGI server
 - `langchain`, `langchain-ollama` - LLM framework
 - `langgraph` - Agent graph orchestration
+- `pydantic` - Data validation
 
-### Tools
+### Tools & Monitoring
 - `psutil` - System monitoring
-- `requests` - HTTP client
+- `httpx` - Async HTTP client
 - `python-dotenv` - Environment management
+- `jinja2` - HTML templating
+- `websockets` - WebSocket support
+
+### Network Drivers
+- `netmiko` - Network device SSH
+- `napalm` - Network automation
+- `paramiko` - SSH library
+- `textfsm`, `ntc-templates` - CLI output parsing
 
 ### Optional
 - `pynetbox` - NetBox API integration
 - `chromadb` - Vector database for RAG
-- `netmiko` - Network device SSH
+- `aiosqlite` - Async SQLite
+- `openai` - DeepSeek LLM integration
+- `aiohttp` - Async HTTP (Discord/Telegram alerts)
 
 ---
 
@@ -873,6 +1083,12 @@ WebSocket connection closed
 ```
 **Solusi**: Normal behavior saat tab browser ditutup. Reconnect otomatis saat tab dibuka kembali.
 
+### 5. High-Risk Action Expired
+```
+Action 'xxx' tidak ditemukan atau sudah expired
+```
+**Solusi**: Pending actions expire setelah 5 menit. Minta agent untuk mencoba lagi.
+
 ---
 
 ## Diagram Komponen Lengkap
@@ -883,45 +1099,52 @@ graph LR
         A[Web Dashboard]
         B[Chat Interface]
         C[Monitoring Panel]
+        D[Infrastructure Tab]
     end
     
     subgraph "API Gateway"
-        D[FastAPI<br/>REST + WebSocket]
+        E[FastAPI<br/>REST + WebSocket]
+        F[Route Modules<br/>7 modules]
     end
     
     subgraph "AI Core"
-        E[LangGraph Agent]
-        F[LLM Client<br/>Ollama]
+        G[LangGraph Agent]
+        H[ChatOllama<br/>LLM Client]
+        I[MemorySaver<br/>Checkpointer]
     end
     
     subgraph "Tool Registry"
-        G[Network Tools]
-        H[Device Tools]
-        I[RAG Tools]
-        J[Scheduler Tools]
+        J[Network Tools 12]
+        K[Device Tools 6]
+        L[RAG Tools 4]
+        M[Scheduler Tools 9]
     end
     
     subgraph "Business Logic"
-        K[Monitoring]
-        L[Security]
-        M[Guardrails]
-        N[Inventory]
+        N[Monitoring]
+        O[Security]
+        P[Guardrails]
+        Q[Inventory]
+        R[Infrastructure]
+        S[Alert Manager]
     end
     
     subgraph "Persistence"
-        O[(SQLite<br/>7 databases)]
-        P[(ChromaDB<br/>RAG vectors)]
+        T[(SQLite<br/>8 databases)]
+        U[(ChromaDB<br/>RAG vectors)]
     end
     
-    A & B & C --> D
-    D --> E
+    A & B & C & D --> E
     E --> F
-    E --> G & H & I & J
-    G & H --> K & L & M & N
-    K & L & M & N --> O
-    I --> P
+    F --> G
+    G --> H
+    G --> I
+    G --> J & K & L & M
+    F --> N & O & P & Q & R & S
+    N & O & Q & R & S --> T
+    L --> U
 ```
 
 ---
 
-*Dokumentasi ini dibuat secara otomatis berdasarkan analisis kode sumber AgenticNet.*
+*Dokumentasi ini diperbarui berdasarkan analisis kode sumber AgenticNet pada Februari 2026.*
