@@ -373,6 +373,80 @@ def enable_remote_interface(device_ip: str, interface: str) -> str:
         f"Untuk melanjutkan, gunakan confirm_action dengan action_id '{action.action_id}'"
     )
 
+@tool
+def execute_cli(device_ip: str, command: str) -> str:
+    """
+    ⚠️ HIGH-RISK: Execute a CLI command on a remote network device via SSH.
+    This action requires confirmation before execution.
+    Use for show/read-only commands (e.g., 'show ip route', 'display interface', '/ip address print').
+    
+    Args:
+        device_ip: IP address of the target device (must be registered in inventory)
+        command: CLI command to execute (e.g., 'show running-config', 'display version')
+    
+    Returns:
+        Confirmation request or command output
+    """
+    from modules.inventory import inventory
+    device = inventory.get_device(device_ip)
+    device_name = device.name if device else device_ip
+    
+    action = pending_store.add(
+        tool_name="execute_cli",
+        params={"device_ip": device_ip, "command": command},
+        description=f"Menjalankan perintah CLI '{command}' pada device {device_name} ({device_ip})",
+        risk_reason="Eksekusi perintah CLI pada perangkat jaringan dapat mempengaruhi operasi jaringan"
+    )
+    return (
+        f"⚠️ KONFIRMASI DIPERLUKAN\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Aksi      : Execute CLI pada {device_name} ({device_ip})\n"
+        f"Perintah  : {command}\n"
+        f"Risiko    : TINGGI - Perintah akan dieksekusi langsung pada perangkat\n"
+        f"Action ID : {action.action_id}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Untuk melanjutkan, gunakan confirm_action dengan action_id '{action.action_id}'"
+    )
+
+
+@tool
+def execute_cli_config(device_ip: str, commands: str) -> str:
+    """
+    ⚠️ HIGH-RISK: Execute configuration commands on a remote network device via SSH.
+    This enters config mode and applies changes. Requires confirmation before execution.
+    Multiple commands separated by semicolon (;).
+    
+    Args:
+        device_ip: IP address of the target device (must be registered in inventory)
+        commands: Config commands separated by semicolon (e.g., 'interface GigabitEthernet0/1; ip address 10.0.0.1 255.255.255.0; no shutdown')
+    
+    Returns:
+        Confirmation request or execution result
+    """
+    from modules.inventory import inventory
+    device = inventory.get_device(device_ip)
+    device_name = device.name if device else device_ip
+    
+    cmd_list = [c.strip() for c in commands.split(";") if c.strip()]
+    cmd_display = "\n".join([f"    {i+1}. {c}" for i, c in enumerate(cmd_list)])
+    
+    action = pending_store.add(
+        tool_name="execute_cli_config",
+        params={"device_ip": device_ip, "commands": commands},
+        description=f"Menjalankan {len(cmd_list)} perintah konfigurasi pada device {device_name} ({device_ip})",
+        risk_reason="Perintah konfigurasi akan MENGUBAH konfigurasi perangkat jaringan"
+    )
+    return (
+        f"⚠️ KONFIRMASI DIPERLUKAN\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Aksi      : Execute Config pada {device_name} ({device_ip})\n"
+        f"Perintah  :\n{cmd_display}\n"
+        f"Risiko    : TINGGI - Konfigurasi perangkat akan DIUBAH\n"
+        f"Action ID : {action.action_id}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"Untuk melanjutkan, gunakan confirm_action dengan action_id '{action.action_id}'"
+    )
+
 
 @tool
 def confirm_action(action_id: str) -> str:
@@ -429,6 +503,67 @@ def confirm_action(action_id: str) -> str:
                     return f"✅ {action.description} berhasil dilakukan"
                 return f"❌ Gagal: {result.error}"
             return f"✅ {action.description} berhasil dilakukan"
+        
+        elif action.tool_name == "execute_cli":
+            from tools.vendor_drivers import connection_manager
+            coro = connection_manager.execute_raw(
+                action.params["device_ip"], 
+                action.params["command"]
+            )
+            try:
+                loop = asyncio.get_running_loop()
+                import concurrent.futures
+                with concurrent.futures.ThreadPoolExecutor() as pool:
+                    result = loop.run_in_executor(pool, lambda: asyncio.run(coro))
+            except RuntimeError:
+                result = asyncio.run(coro)
+            
+            if hasattr(result, 'success'):
+                if result.success:
+                    return f"✅ Perintah berhasil dijalankan pada {action.params['device_ip']}:\n\n```\n{result.output}\n```"
+                return f"❌ Gagal: {result.error}"
+            return str(result)
+        
+        elif action.tool_name == "execute_cli_config":
+            from tools.vendor_drivers import connection_manager
+            from modules.inventory import inventory
+            device_ip = action.params["device_ip"]
+            commands_str = action.params["commands"]
+            cmd_list = [c.strip() for c in commands_str.split(";") if c.strip()]
+            
+            device = inventory.get_device(device_ip)
+            if not device:
+                return f"❌ Device {device_ip} tidak ditemukan di inventory"
+            
+            conn = None
+            try:
+                loop = asyncio.get_running_loop()
+            except RuntimeError:
+                loop = None
+            
+            async def _exec_config():
+                c = await connection_manager.get_connection(device)
+                if not c:
+                    return None
+                return await asyncio.to_thread(c.execute_config, cmd_list)
+            
+            try:
+                if loop and loop.is_running():
+                    import concurrent.futures
+                    with concurrent.futures.ThreadPoolExecutor() as pool:
+                        result = loop.run_in_executor(pool, lambda: asyncio.run(_exec_config()))
+                else:
+                    result = asyncio.run(_exec_config())
+            except RuntimeError:
+                result = asyncio.run(_exec_config())
+            
+            if result is None:
+                return f"❌ Gagal konek ke device {device_ip}"
+            if hasattr(result, 'success'):
+                if result.success:
+                    return f"✅ Konfigurasi berhasil diterapkan pada {device_ip}:\n\n```\n{result.output}\n```"
+                return f"❌ Gagal: {result.error}"
+            return str(result)
         
         else:
             return f"❌ Executor untuk tool '{action.tool_name}' tidak ditemukan"
@@ -550,6 +685,8 @@ def get_all_tools() -> list:
         enable_local_interface,
         shutdown_remote_interface,
         enable_remote_interface,
+        execute_cli,
+        execute_cli_config,
         confirm_action,
         cancel_action,
     ])
@@ -573,6 +710,7 @@ def get_tools_description() -> str:
         "Device Management": ["list_devices", "get_device_details", "add_device", "remove_device", "get_infrastructure_summary", "find_device_by_ip"],
         "Knowledge Base": ["search_knowledge", "add_knowledge", "get_knowledge_stats", "initialize_knowledge_base"],
         "Interface Management (High-Risk)": ["disable_local_interface", "enable_local_interface", "shutdown_remote_interface", "enable_remote_interface", "confirm_action", "cancel_action"],
+        "CLI Execution (High-Risk)": ["execute_cli", "execute_cli_config"],
     }
     
     for category, tool_names in categories.items():
