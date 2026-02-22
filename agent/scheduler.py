@@ -12,6 +12,8 @@ from typing import Dict, List, Optional, Callable
 from datetime import datetime
 import time
 import socket
+import subprocess
+import platform
 
 from agent.infrastructure import (
     infrastructure, 
@@ -158,10 +160,13 @@ class MonitoringScheduler:
         # Determine status
         if not ping_ok:
             status = DeviceStatus.OFFLINE
-        elif ports_closed and device.ports_to_monitor:
-            # Some ports are closed
+        elif not device.ports_to_monitor:
+            # No ports to monitor - ping success is enough
+            status = DeviceStatus.ONLINE
+        elif ports_closed:
+            # Some or all ports are closed, but device is pingable
             if len(ports_closed) == len(device.ports_to_monitor):
-                status = DeviceStatus.OFFLINE
+                status = DeviceStatus.DEGRADED  # Reachable but no monitored services
             else:
                 status = DeviceStatus.DEGRADED
         else:
@@ -179,47 +184,67 @@ class MonitoringScheduler:
         )
     
     async def _ping(self, host: str, timeout: float = 3.0) -> tuple:
-        """Simple ping check using socket connection"""
+        """Ping check using real ICMP ping first, then TCP fallback"""
+        # Try real ICMP ping first
         try:
-            start = time.time()
-            # Try to connect to port 80 or 443 as ping alternative
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            
-            result = await asyncio.to_thread(
-                sock.connect_ex, (host, 80)
-            )
-            latency = (time.time() - start) * 1000
-            sock.close()
-            
-            if result == 0:
-                return True, latency
-            
-            # Try 443
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            result = await asyncio.to_thread(
-                sock.connect_ex, (host, 443)
-            )
-            latency = (time.time() - start) * 1000
-            sock.close()
-            
-            if result == 0:
-                return True, latency
-            
-            # Try ICMP-like with any open port
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(timeout)
-            result = await asyncio.to_thread(
-                sock.connect_ex, (host, 22)
-            )
-            latency = (time.time() - start) * 1000
-            sock.close()
-            
-            return result == 0, latency if result == 0 else -1
-            
-        except Exception as e:
-            return False, -1
+            icmp_ok, icmp_latency = await self._icmp_ping(host, timeout)
+            if icmp_ok:
+                return True, icmp_latency
+        except Exception:
+            pass
+        
+        # Fallback to TCP port probing (for hosts that block ICMP)
+        for port in [80, 443, 22]:
+            try:
+                start = time.time()
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(timeout)
+                result = await asyncio.to_thread(
+                    sock.connect_ex, (host, port)
+                )
+                latency = (time.time() - start) * 1000
+                sock.close()
+                
+                if result == 0:
+                    return True, latency
+            except Exception:
+                continue
+        
+        return False, -1
+    
+    async def _icmp_ping(self, host: str, timeout: float = 3.0) -> tuple:
+        """Real ICMP ping using system ping command (thread-safe for uvicorn)"""
+        import re
+        
+        def _do_ping():
+            try:
+                param = '-n' if platform.system().lower() == 'windows' else '-c'
+                timeout_param = '-w' if platform.system().lower() == 'windows' else '-W'
+                timeout_val = str(int(timeout * 1000)) if platform.system().lower() == 'windows' else str(int(timeout))
+                
+                start = time.time()
+                result = subprocess.run(
+                    ['ping', param, '1', timeout_param, timeout_val, host],
+                    capture_output=True,
+                    text=True,
+                    timeout=timeout + 2
+                )
+                elapsed = (time.time() - start) * 1000
+                
+                if result.returncode == 0:
+                    # Parse actual latency from output
+                    # Windows: "time=1ms" or "time<1ms"
+                    # Linux: "time=1.23 ms"
+                    match = re.search(r'time[=<](\d+\.?\d*)\s*ms', result.stdout)
+                    if match:
+                        elapsed = float(match.group(1))
+                    return True, elapsed
+                
+                return False, -1
+            except Exception:
+                return False, -1
+        
+        return await asyncio.to_thread(_do_ping)
     
     async def _check_port(self, host: str, port: int, timeout: float = 2.0) -> bool:
         """Check if a specific port is open"""

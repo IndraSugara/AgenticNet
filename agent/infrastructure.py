@@ -13,6 +13,8 @@ from datetime import datetime
 from enum import Enum
 import json
 import asyncio
+import os
+import sqlite3
 
 
 class DeviceType(Enum):
@@ -83,6 +85,12 @@ class NetworkDevice:
     # Health history
     health_history: List[HealthCheckResult] = field(default_factory=list)
     
+    # Remote access credentials (optional)
+    connection_protocol: str = "none"  # "ssh", "telnet", or "none"
+    ssh_port: int = 22
+    ssh_username: str = ""
+    ssh_password: str = ""
+    
     def to_dict(self) -> dict:
         return {
             "id": self.id,
@@ -98,7 +106,11 @@ class NetworkDevice:
             "last_check": self.last_check,
             "last_online": self.last_online,
             "uptime_percent": round(self.uptime_percent, 2),
-            "created_at": self.created_at
+            "created_at": self.created_at,
+            "ssh_port": self.ssh_port,
+            "ssh_configured": bool(self.ssh_username),
+            "connection_protocol": self.connection_protocol,
+            "remote_configured": self.connection_protocol != "none" and bool(self.ssh_username),
         }
     
     def update_status(self, result: HealthCheckResult):
@@ -140,10 +152,132 @@ class InfrastructureManager:
     - Uptime reporting
     """
     
+    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "devices.db")
+    
     def __init__(self):
         self.devices: Dict[str, NetworkDevice] = {}
         self._device_counter = 0
         self._status_callbacks: List = []
+        self._init_db()
+        self._load_from_db()
+    
+    def _get_connection(self):
+        """Get SQLite connection with threading support"""
+        return sqlite3.connect(self.DB_PATH, check_same_thread=False)
+    
+    def _init_db(self):
+        """Initialize SQLite database and create table if needed"""
+        os.makedirs(os.path.dirname(self.DB_PATH), exist_ok=True)
+        conn = self._get_connection()
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS devices (
+                id TEXT PRIMARY KEY,
+                name TEXT NOT NULL,
+                ip TEXT NOT NULL,
+                type TEXT DEFAULT 'other',
+                description TEXT DEFAULT '',
+                location TEXT DEFAULT '',
+                ports_to_monitor TEXT DEFAULT '[]',
+                check_interval_seconds INTEGER DEFAULT 60,
+                enabled INTEGER DEFAULT 1,
+                created_at TEXT,
+                connection_protocol TEXT DEFAULT 'none',
+                ssh_port INTEGER DEFAULT 22,
+                ssh_username TEXT DEFAULT '',
+                ssh_password TEXT DEFAULT ''
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS meta (
+                key TEXT PRIMARY KEY,
+                value TEXT
+            )
+        """)
+        conn.commit()
+        conn.close()
+    
+    def _save_device_to_db(self, device: NetworkDevice):
+        """Save or update a single device in the database"""
+        try:
+            conn = self._get_connection()
+            conn.execute("""
+                INSERT OR REPLACE INTO devices 
+                (id, name, ip, type, description, location, ports_to_monitor, 
+                 check_interval_seconds, enabled, created_at, 
+                 connection_protocol, ssh_port, ssh_username, ssh_password)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                device.id, device.name, device.ip, device.type.value,
+                device.description, device.location,
+                json.dumps(device.ports_to_monitor),
+                device.check_interval_seconds, int(device.enabled),
+                device.created_at, device.connection_protocol,
+                device.ssh_port, device.ssh_username, device.ssh_password
+            ))
+            # Save counter
+            conn.execute(
+                "INSERT OR REPLACE INTO meta (key, value) VALUES ('device_counter', ?)",
+                (str(self._device_counter),)
+            )
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"Warning: Could not save device to DB: {e}")
+    
+    def _delete_device_from_db(self, device_id: str):
+        """Delete a device from the database"""
+        try:
+            conn = self._get_connection()
+            conn.execute("DELETE FROM devices WHERE id = ?", (device_id,))
+            conn.commit()
+            conn.close()
+        except Exception as e:
+            print(f"Warning: Could not delete device from DB: {e}")
+    
+    def _load_from_db(self):
+        """Load all devices from SQLite database"""
+        try:
+            conn = self._get_connection()
+            conn.row_factory = sqlite3.Row
+            
+            # Load counter
+            cursor = conn.execute("SELECT value FROM meta WHERE key = 'device_counter'")
+            row = cursor.fetchone()
+            if row:
+                self._device_counter = int(row['value'])
+            
+            # Load devices
+            cursor = conn.execute("SELECT * FROM devices")
+            for row in cursor.fetchall():
+                try:
+                    dev_type = DeviceType(row['type'])
+                except ValueError:
+                    dev_type = DeviceType.OTHER
+                
+                device = NetworkDevice(
+                    id=row['id'],
+                    name=row['name'],
+                    ip=row['ip'],
+                    type=dev_type,
+                    description=row['description'] or "",
+                    location=row['location'] or "",
+                    ports_to_monitor=json.loads(row['ports_to_monitor'] or '[]'),
+                    check_interval_seconds=row['check_interval_seconds'] or 60,
+                    enabled=bool(row['enabled']),
+                    created_at=row['created_at'] or datetime.now().isoformat(),
+                    connection_protocol=row['connection_protocol'] or "none",
+                    ssh_port=row['ssh_port'] or 22,
+                    ssh_username=row['ssh_username'] or "",
+                    ssh_password=row['ssh_password'] or "",
+                )
+                self.devices[row['id']] = device
+            
+            conn.close()
+            if self.devices:
+                print(f"✓ Loaded {len(self.devices)} devices from database")
+        except Exception as e:
+            print(f"Warning: Could not load devices from DB: {e}")
+    
     
     def _generate_id(self) -> str:
         """Generate unique device ID"""
@@ -199,6 +333,7 @@ class InfrastructureManager:
         )
         
         self.devices[device_id] = device
+        self._save_device_to_db(device)
         return device
     
     def _default_ports(self, device_type: DeviceType) -> List[int]:
@@ -219,6 +354,7 @@ class InfrastructureManager:
         """Remove a device from the registry"""
         if device_id in self.devices:
             del self.devices[device_id]
+            self._delete_device_from_db(device_id)
             return True
         return False
     
@@ -268,6 +404,7 @@ class InfrastructureManager:
                         continue
                 setattr(device, key, value)
         
+        self._save_device_to_db(device)
         return device
     
     def get_status_summary(self) -> Dict[str, Any]:

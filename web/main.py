@@ -32,6 +32,7 @@ from web.routes import workflows as workflow_routes
 from web.routes import infrastructure as infra_routes
 from web.routes import devices as device_routes
 from web.routes import guardrails as guardrails_routes
+from web.routes import log_watch as logwatch_routes
 
 
 @asynccontextmanager
@@ -120,6 +121,7 @@ app.include_router(workflow_routes.router)
 app.include_router(infra_routes.router)
 app.include_router(device_routes.router)
 app.include_router(guardrails_routes.router)
+app.include_router(logwatch_routes.router)
 
 
 # Dashboard route (stays in main for template access)

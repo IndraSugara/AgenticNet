@@ -12,6 +12,7 @@
 graph TB
     subgraph "Frontend Layer"
         WEB[Web Dashboard<br/>HTML/CSS/JS]
+        TERM[Terminal Panel<br/>SSH/Telnet]
         WS[WebSocket Client]
     end
     
@@ -46,11 +47,12 @@ graph TB
     end
     
     subgraph "Data Layer"
-        SQLITE[(SQLite DBs)]
+        SQLITE[(SQLite DBs<br/>devices.db, metrics.db, ...)]
         CHROMA[(ChromaDB/RAG)]
     end
     
     WEB --> FASTAPI
+    TERM -->|SSH/Telnet exec| ROUTES
     WS --> WSS
     FASTAPI --> ROUTES
     ROUTES --> LANGGRAPH
@@ -67,6 +69,7 @@ graph TB
     ROUTES --> INFRA
     ROUTES --> ALERT
     INFRA --> SCHED
+    INFRA --> SQLITE
     MONITOR --> SQLITE
     INVENTORY --> SQLITE
     MEMORY --> SQLITE
@@ -139,6 +142,7 @@ agenticNet/
     ├── chat_history.db            # Chat history (SQLite)
     ├── workflow_memory.db         # Workflow memory
     ├── long_term_memory.db        # Solutions & patterns
+    ├── devices.db                 # Device registry (persisted)
     ├── inventory.db               # Device inventory
     ├── metrics.db                 # System metrics history
     ├── config_backups.db          # Configuration backups
@@ -361,10 +365,11 @@ class UnifiedCommand:
 
 #### 5.1 Infrastructure Manager (agent/infrastructure.py)
 
-Manajemen perangkat jaringan kantor:
+Manajemen perangkat jaringan dengan **SQLite persistence** (`data/devices.db`):
 
 ```python
 class InfrastructureManager:
+    # CRUD
     def add_device(name, ip, device_type, ...) -> NetworkDevice
     def remove_device(device_id) -> bool
     def get_device(device_id) -> NetworkDevice
@@ -373,13 +378,60 @@ class InfrastructureManager:
     def get_status_summary() -> Dict
     def export_config() -> str
     def import_config(config_json) -> int
+    
+    # SQLite Persistence
+    def _init_db()              # Create devices & meta tables
+    def _save_device_to_db(device)   # INSERT OR REPLACE single device
+    def _delete_device_from_db(id)   # DELETE single device
+    def _load_from_db()              # Load all devices on startup
 ```
 
 **Device Types:** `router`, `switch`, `server`, `pc`, `printer`, `access_point`, `firewall`, `other`
 
 **Device Status:** `online`, `offline`, `degraded`, `unknown`
 
-#### 5.2 Alert Manager (agent/alerting.py)
+**Connection Protocol:** `ssh`, `telnet`, `none`
+
+**Persistence Schema (`data/devices.db`):**
+```sql
+CREATE TABLE devices (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    ip TEXT NOT NULL,
+    type TEXT,
+    description TEXT, location TEXT,
+    ports_to_monitor TEXT,        -- JSON array
+    check_interval_seconds INTEGER,
+    enabled INTEGER,
+    created_at TEXT,
+    connection_protocol TEXT,     -- ssh/telnet/none
+    ssh_port INTEGER,
+    ssh_username TEXT,
+    ssh_password TEXT
+);
+
+CREATE TABLE meta (
+    key TEXT PRIMARY KEY,
+    value TEXT
+);
+```
+
+#### 5.2 Terminal Panel (SSH/Telnet)
+
+Dashboard menyediakan terminal interaktif untuk eksekusi perintah remote:
+
+- **SSH** — via `paramiko` library
+- **Telnet** — via Python `socket` library
+- **Unified endpoint** — otomatis routing ke SSH atau Telnet berdasarkan `connection_protocol` device
+
+**Endpoints:**
+| Endpoint | Fungsi |
+|----------|--------|
+| `POST /infra/devices/{id}/ssh/exec` | Eksekusi command via SSH |
+| `POST /infra/devices/{id}/telnet/exec` | Eksekusi command via Telnet |
+| `POST /infra/devices/{id}/remote/exec` | Unified — otomatis pilih SSH/Telnet |
+
+#### 5.3 Alert Manager (agent/alerting.py)
 
 Sistem notifikasi multi-channel:
 
@@ -401,7 +453,7 @@ class AlertManager:
 
 **Alert Severity:** `info`, `warning`, `critical`
 
-#### 5.3 Scheduler (agent/scheduler.py)
+#### 5.4 Scheduler (agent/scheduler.py)
 
 Penjadwalan health check otomatis untuk perangkat terdaftar.
 
@@ -588,6 +640,9 @@ app.include_router(guardrails_routes.router)
 | **Infrastructure** | `/infra/devices` | GET/POST | Device management |
 | | `/infra/devices/{id}` | GET/PUT/DELETE | Single device |
 | | `/infra/devices/{id}/status` | GET | Check device status |
+| | `/infra/devices/{id}/ssh/exec` | POST | Execute command via SSH |
+| | `/infra/devices/{id}/telnet/exec` | POST | Execute command via Telnet |
+| | `/infra/devices/{id}/remote/exec` | POST | Unified remote execution |
 | | `/infra/summary` | GET | Infrastructure summary |
 | | `/infra/monitor/start` | POST | Start monitoring |
 | | `/infra/monitor/stop` | POST | Stop monitoring |
@@ -1100,6 +1155,7 @@ graph LR
         B[Chat Interface]
         C[Monitoring Panel]
         D[Infrastructure Tab]
+        T2[Terminal Panel<br/>SSH/Telnet]
     end
     
     subgraph "API Gateway"
@@ -1125,16 +1181,16 @@ graph LR
         O[Security]
         P[Guardrails]
         Q[Inventory]
-        R[Infrastructure]
+        R[Infrastructure<br/>SQLite Persisted]
         S[Alert Manager]
     end
     
     subgraph "Persistence"
-        T[(SQLite<br/>8 databases)]
+        T[(SQLite<br/>9 databases)]
         U[(ChromaDB<br/>RAG vectors)]
     end
     
-    A & B & C & D --> E
+    A & B & C & D & T2 --> E
     E --> F
     F --> G
     G --> H
@@ -1147,4 +1203,76 @@ graph LR
 
 ---
 
-*Dokumentasi ini diperbarui berdasarkan analisis kode sumber AgenticNet pada Februari 2026.*
+## Arsitektur Monitoring (Roadmap)
+
+AgenticNet saat ini menggunakan built-in scheduler untuk health check (ping + port scan). Arsitektur target menggunakan stack monitoring profesional:
+
+```mermaid
+graph TB
+    subgraph "Perangkat Jaringan"
+        DEV[Router / Switch / Firewall / AP]
+    end
+
+    subgraph "Pengumpulan Data"
+        GNMI[gNMI Streaming Telemetry<br/>Push real-time]
+        SNMP[SNMP Exporter<br/>Pull fallback]
+        SYS[Syslog<br/>Push log]
+    end
+
+    subgraph "Pipeline"
+        OTEL[OpenTelemetry Collector<br/>Unified pipeline]
+    end
+
+    subgraph "Penyimpanan"
+        PROM[Prometheus<br/>Time-series metrics]
+        LOKI[Loki<br/>Operational logs]
+        VDB[ChromaDB<br/>Vector DB / RAG]
+    end
+
+    subgraph "Konteks"
+        NB[NetBox<br/>Source of Truth]
+    end
+
+    subgraph "Otak"
+        AN["🧠 AgenticNet<br/>LangGraph + Tools"]
+    end
+
+    DEV --> GNMI & SNMP & SYS
+    GNMI & SNMP & SYS --> OTEL
+    OTEL --> PROM & LOKI
+    LOKI --> VDB
+    AN -->|query metrik| PROM
+    AN -->|query log| LOKI
+    AN -->|semantic search| VDB
+    AN -->|cek desain| NB
+    AN -->|SSH/Telnet| DEV
+```
+
+### Kompatibilitas Vendor
+
+| Device | SNMP | gNMI | Syslog | REST API | SSH | Telnet | Metode Terbaik |
+|--------|:----:|:----:|:------:|:--------:|:---:|:------:|---------------|
+| Cisco IOS-XR/XE | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | gNMI + Syslog |
+| Juniper | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | gNMI + Syslog |
+| MikroTik | ✅ | ⚠️ | ✅ | ✅ | ✅ | ❌ | SNMP + API + Syslog |
+| UniFi (Ubiquiti) | ✅ | ❌ | ✅ | ✅* | ✅ | ❌ | Controller API + Syslog |
+| Ruijie Enterprise | ✅ | ⚠️ | ✅ | ❌ | ✅ | ✅ | SNMP + Syslog |
+| Reyee | ✅ | ❌ | ✅ | ⚠️ | ✅ | ✅ | SNMP + Syslog |
+
+*\*UniFi Controller API (unofficial tapi stabil)*
+
+### Target LangGraph Tools
+
+| Tool | Data Source | Fungsi |
+|------|-------------|--------|
+| `query_prometheus` | Prometheus REST API | Query metrik jaringan (PromQL) |
+| `query_loki` | Loki REST API | Query log operasional (LogQL) |
+| `search_network_knowledge` | ChromaDB (Vector DB) | Semantic search log + dokumentasi |
+| `check_netbox` | NetBox REST API | Cek desain vs realita (intent-based) |
+| `execute_on_device` | SSH/Telnet | Remediasi otomatis (dengan approval) |
+
+> Lihat `architecture_guide.md` untuk dokumentasi teknis lengkap.
+
+---
+
+*Dokumentasi ini diperbarui berdasarkan arsitektur AgenticNet pada Februari 2026.*

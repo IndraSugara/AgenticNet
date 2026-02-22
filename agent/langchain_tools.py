@@ -679,6 +679,27 @@ def get_all_tools() -> list:
     except ImportError:
         pass
     
+    # Add log watch tools
+    try:
+        from agent.langchain_logwatch_tools import get_logwatch_tools
+        tools.extend(get_logwatch_tools())
+    except ImportError:
+        pass
+    
+    # Add remediation tools
+    try:
+        from agent.langchain_remediation_tools import get_remediation_tools
+        tools.extend(get_remediation_tools())
+    except ImportError:
+        pass
+    
+    # Add network intelligence tools
+    try:
+        from agent.langchain_intelligence_tools import get_intelligence_tools
+        tools.extend(get_intelligence_tools())
+    except ImportError:
+        pass
+    
     # Add high-risk interface management tools
     tools.extend([
         disable_local_interface,
@@ -711,6 +732,7 @@ def get_tools_description() -> str:
         "Knowledge Base": ["search_knowledge", "add_knowledge", "get_knowledge_stats", "initialize_knowledge_base"],
         "Interface Management (High-Risk)": ["disable_local_interface", "enable_local_interface", "shutdown_remote_interface", "enable_remote_interface", "confirm_action", "cancel_action"],
         "CLI Execution (High-Risk)": ["execute_cli", "execute_cli_config"],
+        "Log Monitoring": ["start_log_watch", "stop_log_watch", "get_log_watch_status", "get_device_logs", "get_recent_anomalies", "add_anomaly_pattern"],
     }
     
     for category, tool_names in categories.items():

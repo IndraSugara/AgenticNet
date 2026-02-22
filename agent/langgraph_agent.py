@@ -3,7 +3,7 @@ LangGraph Agent for Network Infrastructure
 
 Implements a graph-based agent workflow using LangGraph with:
 - StateGraph for managing conversation state
-- Automatic tool calling with Ollama
+- Automatic tool calling with multi-provider LLM support
 - Memory checkpointing for conversation persistence
 - Streaming support for real-time responses
 """
@@ -17,7 +17,7 @@ from langgraph.graph.message import add_messages
 from langgraph.prebuilt import ToolNode, tools_condition
 from langgraph.checkpoint.memory import MemorySaver
 
-from agent.langchain_llm import get_llm
+from agent.langchain_llm import get_llm_with_fallback, FallbackLLM
 from agent.langchain_tools import get_all_tools
 from agent.logging_config import get_logger
 from config import config
@@ -88,6 +88,14 @@ Tools: `execute_cli`, `execute_cli_config`
 - `execute_cli_config`: Jalankan perintah konfigurasi yang MENGUBAH config perangkat (e.g., `interface eth0; ip address 10.0.0.1 255.255.255.0`)
 - SEMUA memerlukan konfirmasi user sebelum eksekusi
 - Device harus terdaftar di inventory dengan kredensial SSH
+
+### 11. Log Monitoring
+Tools: `start_log_watch`, `stop_log_watch`, `get_log_watch_status`, `get_device_logs`, `get_recent_anomalies`, `add_anomaly_pattern`
+- Monitor log perangkat secara otomatis dan deteksi anomali (link down, auth failure, error, routing changes)
+- `get_device_logs`: ambil log on-demand dari device
+- `start_log_watch` / `stop_log_watch`: mulai/hentikan monitoring otomatis
+- `get_recent_anomalies`: lihat anomali yang terdeteksi
+- Anomali otomatis memicu alert dan (opsional) investigasi agent
 </capabilities>
 
 <supported_vendors>
@@ -274,7 +282,10 @@ def create_agent_node(llm_with_tools, llm_base=None):
 
 def build_agent_graph(checkpointer=None):
     """
-    Build the LangGraph agent
+    Build the LangGraph agent with multi-provider LLM support.
+    
+    Uses get_llm_with_fallback() for automatic provider switching.
+    If FallbackLLM is used, both primary and fallback will have tools bound.
     
     Args:
         checkpointer: Optional memory checkpointer for state persistence
@@ -282,9 +293,12 @@ def build_agent_graph(checkpointer=None):
     Returns:
         Compiled graph that can be invoked
     """
-    # Get LLM and tools
+    # Get LLM (with fallback if configured) and tools
     tools = get_all_tools()
-    llm = get_llm()
+    llm = get_llm_with_fallback()
+    
+    # For FallbackLLM, we need the base LLM without tools for schema error recovery
+    llm_base = llm  # Keep a reference to the unwrapped LLM
     
     # Try to bind tools - some models don't support function calling
     try:
@@ -302,7 +316,7 @@ def build_agent_graph(checkpointer=None):
     if supports_tools:
         # Full agent with tool calling
         tool_node = ToolNode(tools)
-        graph.add_node("agent", create_agent_node(llm_with_tools, llm_base=llm))
+        graph.add_node("agent", create_agent_node(llm_with_tools, llm_base=llm_base))
         graph.add_node("tools", tool_node)
         graph.add_edge(START, "agent")
         graph.add_conditional_edges("agent", tools_condition)

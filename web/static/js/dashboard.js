@@ -1549,10 +1549,24 @@ async function showAddDevice() {
     
     const type = await showPrompt('Add New Device', 'Device Type (router/switch/server/pc/printer/access_point/firewall/other):', 'other');
     
-    addDevice(name, ip, type || 'other');
+    // Connection protocol
+    const protocol = await showPrompt('Remote Access (optional)', 'Connection Protocol (ssh/telnet/none):', 'none');
+    let sshUser = '', sshPass = '', sshPort = 22;
+    
+    if (protocol === 'ssh' || protocol === 'telnet') {
+        sshUser = await showPrompt(`${protocol.toUpperCase()} Credentials`, 'Username:');
+        if (sshUser) {
+            sshPass = await showPrompt(`${protocol.toUpperCase()} Credentials`, 'Password:');
+            const defaultPort = protocol === 'ssh' ? '22' : '23';
+            const portStr = await showPrompt(`${protocol.toUpperCase()} Credentials`, 'Port:', defaultPort);
+            sshPort = parseInt(portStr) || (protocol === 'ssh' ? 22 : 23);
+        }
+    }
+    
+    addDevice(name, ip, type || 'other', protocol || 'none', sshUser, sshPass, sshPort);
 }
 
-async function addDevice(name, ip, type) {
+async function addDevice(name, ip, type, protocol = 'none', sshUsername = '', sshPassword = '', sshPort = 22) {
     try {
         const response = await fetch('/infra/devices', {
             method: 'POST',
@@ -1564,14 +1578,19 @@ async function addDevice(name, ip, type) {
                 description: '',
                 location: '',
                 ports_to_monitor: [],
-                check_interval: 60
+                check_interval: 60,
+                connection_protocol: protocol,
+                ssh_username: sshUsername,
+                ssh_password: sshPassword,
+                ssh_port: sshPort
             })
         });
         
         const data = await response.json();
         
         if (data.success) {
-            addMessage(`✓ Device "${name}" (${ip}) added`, 'agent');
+            const protoNote = protocol !== 'none' ? ` (${protocol.toUpperCase()} enabled)` : '';
+            addMessage(`✓ Device "${name}" (${ip}) added${protoNote}`, 'agent');
             updateDeviceList();
             updateInfraSummary();
         } else {
@@ -1617,7 +1636,7 @@ async function updateDeviceList() {
                     const lastCheck = device.last_check ? new Date(device.last_check).toLocaleTimeString() : '-';
                     
                     return `
-                        <div class="device-row" data-device-id="${device.id}">
+                        <div class="device-row" data-device-id="${device.id}" onclick="onDeviceRowClick(event, '${device.id}', '${device.name}', '${device.ip}', '${device.status || 'unknown'}', ${device.remote_configured || false}, '${device.connection_protocol || 'none'}')">
                             <span class="col-status">
                                 <span class="status-badge ${statusClass}">
                                     <span class="status-dot"></span>
@@ -1887,3 +1906,607 @@ setInterval(checkHealth, 10000);           // Every 10s
 // Initial load
 loadConversationHistory();
 initModelSelector();
+
+// ============= LOG WATCH =============
+
+let logWatchRunning = false;
+let logWatchPollInterval = null;
+
+async function toggleLogWatch() {
+    const btn = document.getElementById('btn-logwatch-toggle');
+    const btnText = document.getElementById('logwatch-btn-text');
+    
+    try {
+        if (logWatchRunning) {
+            const response = await fetch('/logs/watch/stop', { method: 'POST' });
+            const data = await response.json();
+            if (data.success) {
+                logWatchRunning = false;
+                btnText.textContent = 'Log Watch';
+                btn.classList.remove('logwatch-active');
+                // Stop investigation polling
+                if (logWatchPollInterval) {
+                    clearInterval(logWatchPollInterval);
+                    logWatchPollInterval = null;
+                }
+            }
+        } else {
+            const response = await fetch('/logs/watch/start', { method: 'POST' });
+            const data = await response.json();
+            if (data.success) {
+                logWatchRunning = true;
+                btnText.textContent = 'Watching...';
+                btn.classList.add('logwatch-active');
+                // Start polling for investigations
+                startInvestigationPolling();
+            }
+        }
+    } catch (e) {
+        console.error('Toggle log watch failed:', e);
+    }
+}
+
+function startInvestigationPolling() {
+    if (logWatchPollInterval) return;
+    logWatchPollInterval = setInterval(pollInvestigations, 5000);
+}
+
+async function pollInvestigations() {
+    try {
+        const response = await fetch('/logs/watch/investigations?unseen_only=true');
+        const data = await response.json();
+        
+        if (!data.investigations || data.investigations.length === 0) {
+            // Hide badge
+            const badge = document.getElementById('logwatch-badge');
+            if (badge) badge.style.display = 'none';
+            return;
+        }
+        
+        // Show badge count
+        const badge = document.getElementById('logwatch-badge');
+        if (badge) {
+            badge.textContent = data.investigations.length;
+            badge.style.display = '';
+        }
+        
+        // Auto-open the latest unseen investigation as a new chat
+        const latest = data.investigations[data.investigations.length - 1];
+        await openInvestigationChat(latest);
+        
+    } catch (e) {
+        console.error('Poll investigations failed:', e);
+    }
+}
+
+async function openInvestigationChat(investigation) {
+    // Mark as seen
+    try {
+        await fetch(`/logs/watch/investigations/${investigation.id}/seen`, { method: 'POST' });
+    } catch (e) {
+        console.error('Mark seen failed:', e);
+    }
+    
+    // Save current chat
+    saveChatHistory();
+    
+    // Switch to investigation thread
+    currentThreadId = investigation.thread_id;
+    localStorage.setItem('chatThreadId', currentThreadId);
+    
+    // Build investigation chat UI
+    const chatMessages = document.getElementById('chat-messages');
+    const severityEmoji = investigation.severity === 'critical' ? '🚨' : '⚠️';
+    const severityClass = investigation.severity === 'critical' ? 'risk-high' : '';
+    
+    chatMessages.innerHTML = `
+        <div class="message agent">
+            <div class="message-avatar">
+                <span class="icon"><svg><use href="#icon-alert-triangle"/></svg></span>
+            </div>
+            <div class="message-content">
+                <div class="confirm-card">
+                    <div class="confirm-header">
+                        <span class="confirm-icon">${severityEmoji}</span>
+                        <span class="confirm-title">Anomali Terdeteksi — Auto-Investigasi</span>
+                    </div>
+                    <div class="confirm-details">
+                        <div class="confirm-row">
+                            <span class="confirm-label">Device:</span>
+                            <span class="confirm-value">${investigation.device_name} (${investigation.device_ip})</span>
+                        </div>
+                        <div class="confirm-row">
+                            <span class="confirm-label">Severity:</span>
+                            <span class="confirm-value ${severityClass}">${investigation.severity.toUpperCase()}</span>
+                        </div>
+                        <div class="confirm-row">
+                            <span class="confirm-label">Pattern:</span>
+                            <span class="confirm-value">${investigation.description}</span>
+                        </div>
+                        <div class="confirm-row">
+                            <span class="confirm-label">Log:</span>
+                            <span class="confirm-value"><code>${investigation.log_line}</code></span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="message agent">
+            <div class="message-avatar">
+                <span class="icon"><svg><use href="#icon-robot"/></svg></span>
+            </div>
+            <div class="message-content">
+                <p>${formatMarkdown(investigation.agent_response || 'Investigasi sedang berlangsung...')}</p>
+            </div>
+        </div>
+    `;
+    
+    // Check if agent response contains high-risk confirmation
+    if (investigation.agent_response) {
+        const actionIdMatch = investigation.agent_response.match(/Action ID\s*:\s*([\w-]+)/i);
+        if (actionIdMatch && (
+            investigation.agent_response.includes('KONFIRMASI DIPERLUKAN') ||
+            investigation.agent_response.includes('confirm_action')
+        )) {
+            const actionId = actionIdMatch[1].trim();
+            handleHighRiskConfirmation(actionId, investigation.agent_response);
+        }
+    }
+    
+    chatMessages.scrollTop = chatMessages.scrollHeight;
+    saveChatHistory();
+    
+    // Refresh thread list
+    loadChatThreads();
+    
+    // Hide badge for now
+    const badge = document.getElementById('logwatch-badge');
+    if (badge) badge.style.display = 'none';
+}
+
+// Check log watch status on page load
+async function checkLogWatchStatus() {
+    try {
+        const response = await fetch('/logs/watch/status');
+        const data = await response.json();
+        
+        if (data.running) {
+            logWatchRunning = true;
+            const btn = document.getElementById('btn-logwatch-toggle');
+            const btnText = document.getElementById('logwatch-btn-text');
+            if (btn) btn.classList.add('logwatch-active');
+            if (btnText) btnText.textContent = 'Watching...';
+            startInvestigationPolling();
+        }
+    } catch (e) {
+        // Ignore
+    }
+}
+
+// Init on load
+document.addEventListener('DOMContentLoaded', () => {
+    setTimeout(checkLogWatchStatus, 1000);
+});
+
+// ============= TERMINAL PANEL =============
+
+let terminalOpen = false;
+let terminalMaximized = false;
+let terminalTabs = {};       // { tabId: { deviceId, deviceName, deviceIp, status, refreshInterval } }
+let activeTerminalTab = null;
+let terminalCounter = 0;
+
+// Device row click handler
+function onDeviceRowClick(event, deviceId, deviceName, deviceIp, deviceStatus, remoteConfigured, connectionProtocol) {
+    // Don't open terminal if clicking action buttons
+    if (event.target.closest('.col-actions')) return;
+    openDeviceTerminal(deviceId, deviceName, deviceIp, deviceStatus, remoteConfigured, connectionProtocol);
+}
+
+// Toggle terminal panel open/close
+function toggleTerminalPanel() {
+    const panel = document.getElementById('terminal-panel');
+    const btn = document.getElementById('btn-terminal-toggle');
+    terminalOpen = !terminalOpen;
+    
+    if (terminalOpen) {
+        panel.classList.add('open');
+        btn.classList.add('active');
+    } else {
+        panel.classList.remove('open');
+        btn.classList.remove('active');
+        terminalMaximized = false;
+        panel.classList.remove('maximized');
+    }
+}
+
+// Toggle maximize
+function toggleTerminalMaximize() {
+    const panel = document.getElementById('terminal-panel');
+    terminalMaximized = !terminalMaximized;
+    
+    if (terminalMaximized) {
+        panel.classList.add('maximized');
+    } else {
+        panel.classList.remove('maximized');
+    }
+}
+
+// Open a terminal tab for a device
+function openDeviceTerminal(deviceId, deviceName, deviceIp, deviceStatus, remoteConfigured, connectionProtocol) {
+    // Check if tab already exists for this device
+    const existingTabId = Object.keys(terminalTabs).find(id => terminalTabs[id].deviceId === deviceId);
+    
+    if (existingTabId) {
+        switchTerminalTab(existingTabId);
+        if (!terminalOpen) toggleTerminalPanel();
+        return;
+    }
+    
+    // Create new tab
+    terminalCounter++;
+    const tabId = `term-${terminalCounter}`;
+    
+    terminalTabs[tabId] = {
+        deviceId, deviceName, deviceIp, status: deviceStatus || 'unknown',
+        remoteConfigured: !!remoteConfigured,
+        connectionProtocol: connectionProtocol || 'none',
+        refreshInterval: null
+    };
+    
+    // Show terminal panel if not open
+    if (!terminalOpen) toggleTerminalPanel();
+    
+    // Hide welcome message
+    const welcome = document.getElementById('terminal-welcome');
+    if (welcome) welcome.style.display = 'none';
+    
+    // Create tab button
+    const tabsContainer = document.getElementById('terminal-tabs');
+    const tab = document.createElement('button');
+    tab.className = 'terminal-tab active';
+    tab.id = `tab-btn-${tabId}`;
+    tab.innerHTML = `
+        <span class="tab-dot ${deviceStatus || 'unknown'}"></span>
+        <span class="tab-label">${deviceName}</span>
+        <span class="tab-close" onclick="event.stopPropagation(); closeTerminalTab('${tabId}')">
+            <svg width="10" height="10" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+        </span>
+    `;
+    tab.onclick = (e) => { if (!e.target.closest('.tab-close')) switchTerminalTab(tabId); };
+    
+    // Deactivate other tabs
+    tabsContainer.querySelectorAll('.terminal-tab').forEach(t => t.classList.remove('active'));
+    tabsContainer.appendChild(tab);
+    
+    // Create output pane
+    const body = document.getElementById('terminal-body');
+    body.querySelectorAll('.terminal-output').forEach(o => o.classList.remove('active'));
+    
+    const output = document.createElement('div');
+    output.className = 'terminal-output active';
+    output.id = `output-${tabId}`;
+    body.appendChild(output);
+    
+    activeTerminalTab = tabId;
+    
+    // Initial log lines
+    appendTerminalLine(tabId, `Connected to ${deviceName} (${deviceIp})`, 'system');
+    const proto = connectionProtocol || 'none';
+    if (remoteConfigured && proto !== 'none') {
+        appendTerminalLine(tabId, `${proto.toUpperCase()} enabled — commands will be executed on this device remotely.`, 'success');
+    } else {
+        appendTerminalLine(tabId, `No remote access configured — commands run locally. Edit device to add SSH/Telnet credentials.`, 'warning');
+    }
+    appendTerminalLine(tabId, `Loading health check logs...`, 'info');
+    
+    // Fetch existing logs
+    fetchDeviceLogs(tabId, deviceId);
+    
+    // Set up auto-refresh every 10s
+    terminalTabs[tabId].refreshInterval = setInterval(() => {
+        fetchDeviceLogs(tabId, deviceId, true);
+    }, 10000);
+}
+
+// Switch active terminal tab
+function switchTerminalTab(tabId) {
+    if (!terminalTabs[tabId]) return;
+    activeTerminalTab = tabId;
+    
+    // Update tab buttons
+    document.querySelectorAll('.terminal-tab').forEach(t => t.classList.remove('active'));
+    const tabBtn = document.getElementById(`tab-btn-${tabId}`);
+    if (tabBtn) tabBtn.classList.add('active');
+    
+    // Update output panes
+    document.querySelectorAll('.terminal-output').forEach(o => o.classList.remove('active'));
+    const output = document.getElementById(`output-${tabId}`);
+    if (output) output.classList.add('active');
+}
+
+// Close a terminal tab
+function closeTerminalTab(tabId) {
+    const tab = terminalTabs[tabId];
+    if (!tab) return;
+    
+    // Clear refresh interval
+    if (tab.refreshInterval) clearInterval(tab.refreshInterval);
+    
+    // Remove tab button and output
+    const tabBtn = document.getElementById(`tab-btn-${tabId}`);
+    if (tabBtn) tabBtn.remove();
+    const output = document.getElementById(`output-${tabId}`);
+    if (output) output.remove();
+    
+    delete terminalTabs[tabId];
+    
+    // Switch to another tab or show welcome
+    const remaining = Object.keys(terminalTabs);
+    if (remaining.length > 0) {
+        switchTerminalTab(remaining[remaining.length - 1]);
+    } else {
+        activeTerminalTab = null;
+        const welcome = document.getElementById('terminal-welcome');
+        if (welcome) welcome.style.display = 'flex';
+    }
+}
+
+// Clear active terminal output
+function clearActiveTerminal() {
+    if (!activeTerminalTab) return;
+    const output = document.getElementById(`output-${activeTerminalTab}`);
+    if (output) output.innerHTML = '';
+    appendTerminalLine(activeTerminalTab, 'Terminal cleared.', 'system');
+}
+
+// Append a line to terminal output
+function appendTerminalLine(tabId, text, type = 'info') {
+    const output = document.getElementById(`output-${tabId}`);
+    if (!output) return;
+    
+    const now = new Date();
+    const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    
+    const line = document.createElement('div');
+    line.className = `terminal-line ${type}`;
+    line.innerHTML = `<span class="time">${timeStr}</span><span class="text">${escapeHtml(text)}</span>`;
+    output.appendChild(line);
+    
+    // Auto-scroll to bottom
+    output.scrollTop = output.scrollHeight;
+    
+    // Limit lines to 500
+    while (output.children.length > 500) {
+        output.removeChild(output.firstChild);
+    }
+}
+
+// Escape HTML for security
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+// Fetch device logs from backend
+async function fetchDeviceLogs(tabId, deviceId, isRefresh = false) {
+    try {
+        const response = await fetch(`/infra/devices/${deviceId}/logs?limit=30`);
+        if (!response.ok) return;
+        const data = await response.json();
+        
+        if (!isRefresh) {
+            // Initial load — show all logs
+            const output = document.getElementById(`output-${tabId}`);
+            if (!output) return;
+            
+            if (data.logs.length === 0) {
+                appendTerminalLine(tabId, 'No health check history yet. Click Check to run first scan.', 'info');
+                return;
+            }
+            
+            appendTerminalLine(tabId, `--- Health Check History (${data.logs.length} entries) ---`, 'system');
+            
+            for (const log of data.logs) {
+                const time = new Date(log.time);
+                const timeStr = time.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                
+                const line = document.createElement('div');
+                line.className = `terminal-line ${log.type}`;
+                line.innerHTML = `<span class="time">${timeStr}</span><span class="text">${escapeHtml(log.text)}</span>`;
+                output.appendChild(line);
+            }
+            
+            output.scrollTop = output.scrollHeight;
+        } else {
+            // Refresh — update tab status dot
+            const tab = terminalTabs[tabId];
+            if (tab && data.device_status !== tab.status) {
+                tab.status = data.device_status;
+                const dot = document.querySelector(`#tab-btn-${tabId} .tab-dot`);
+                if (dot) dot.className = `tab-dot ${data.device_status}`;
+                appendTerminalLine(tabId, `Status changed → ${data.device_status.toUpperCase()}`, 
+                    data.device_status === 'online' ? 'success' : data.device_status === 'offline' ? 'error' : 'warning');
+            }
+        }
+    } catch (e) {
+        if (!isRefresh) appendTerminalLine(tabId, `Error fetching logs: ${e.message}`, 'error');
+    }
+}
+
+// ============= TERMINAL DRAG RESIZE =============
+
+(function initTerminalResize() {
+    const handle = document.getElementById('terminal-drag-handle');
+    const panel = document.getElementById('terminal-panel');
+    if (!handle || !panel) return;
+    
+    let isResizing = false;
+    let startY = 0;
+    let startHeight = 0;
+    
+    handle.addEventListener('mousedown', (e) => {
+        // Only start resize if not clicking buttons
+        if (e.target.closest('.terminal-tab, .terminal-action-btn, .terminal-header-left')) return;
+        
+        isResizing = true;
+        startY = e.clientY;
+        startHeight = panel.offsetHeight;
+        panel.classList.add('resizing');
+        document.body.style.cursor = 'ns-resize';
+        document.body.style.userSelect = 'none';
+        e.preventDefault();
+    });
+    
+    document.addEventListener('mousemove', (e) => {
+        if (!isResizing) return;
+        const delta = startY - e.clientY;
+        const newHeight = Math.max(120, Math.min(window.innerHeight * 0.7, startHeight + delta));
+        panel.style.height = newHeight + 'px';
+    });
+    
+    document.addEventListener('mouseup', () => {
+        if (!isResizing) return;
+        isResizing = false;
+        panel.classList.remove('resizing');
+        document.body.style.cursor = '';
+        document.body.style.userSelect = '';
+    });
+})();
+
+// ============= TERMINAL COMMAND INPUT =============
+
+let commandHistory = [];
+let historyIndex = -1;
+
+document.addEventListener('DOMContentLoaded', () => {
+    const input = document.getElementById('terminal-cmd-input');
+    if (!input) return;
+    
+    input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' && input.value.trim()) {
+            const cmd = input.value.trim();
+            commandHistory.unshift(cmd);
+            if (commandHistory.length > 50) commandHistory.pop();
+            historyIndex = -1;
+            
+            executeTerminalCommand(cmd);
+            input.value = '';
+        } else if (e.key === 'ArrowUp') {
+            e.preventDefault();
+            if (historyIndex < commandHistory.length - 1) {
+                historyIndex++;
+                input.value = commandHistory[historyIndex];
+            }
+        } else if (e.key === 'ArrowDown') {
+            e.preventDefault();
+            if (historyIndex > 0) {
+                historyIndex--;
+                input.value = commandHistory[historyIndex];
+            } else {
+                historyIndex = -1;
+                input.value = '';
+            }
+        }
+    });
+});
+
+// Ensure a tab exists for command output (use active tab or create "General" tab)
+function ensureCommandTab() {
+    if (activeTerminalTab) return activeTerminalTab;
+    
+    // Create "General" tab
+    terminalCounter++;
+    const tabId = `term-${terminalCounter}`;
+    
+    terminalTabs[tabId] = {
+        deviceId: null, deviceName: 'General', deviceIp: '', status: 'unknown',
+        refreshInterval: null
+    };
+    
+    if (!terminalOpen) toggleTerminalPanel();
+    
+    const welcome = document.getElementById('terminal-welcome');
+    if (welcome) welcome.style.display = 'none';
+    
+    const tabsContainer = document.getElementById('terminal-tabs');
+    const tab = document.createElement('button');
+    tab.className = 'terminal-tab active';
+    tab.id = `tab-btn-${tabId}`;
+    tab.innerHTML = `
+        <span class="tab-dot unknown"></span>
+        <span class="tab-label">General</span>
+        <span class="tab-close" onclick="event.stopPropagation(); closeTerminalTab('${tabId}')">
+            <svg width="10" height="10" viewBox="0 0 24 24" stroke="currentColor" stroke-width="3" fill="none">
+                <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+            </svg>
+        </span>
+    `;
+    tab.onclick = (e) => { if (!e.target.closest('.tab-close')) switchTerminalTab(tabId); };
+    
+    tabsContainer.querySelectorAll('.terminal-tab').forEach(t => t.classList.remove('active'));
+    tabsContainer.appendChild(tab);
+    
+    const body = document.getElementById('terminal-body');
+    body.querySelectorAll('.terminal-output').forEach(o => o.classList.remove('active'));
+    
+    const output = document.createElement('div');
+    output.className = 'terminal-output active';
+    output.id = `output-${tabId}`;
+    body.appendChild(output);
+    
+    activeTerminalTab = tabId;
+    appendTerminalLine(tabId, 'Terminal ready. Type "help" for available commands.', 'system');
+    
+    return tabId;
+}
+
+// Execute a command and render output
+async function executeTerminalCommand(cmd) {
+    const tabId = ensureCommandTab();
+    const tab = terminalTabs[tabId];
+    
+    // Show the command being executed
+    appendTerminalLine(tabId, `$ ${cmd}`, 'system');
+    
+    // Determine endpoint: remote (SSH/Telnet) for device tabs, local otherwise
+    let endpoint = '/infra/terminal/exec';
+    if (tab && tab.deviceId && tab.remoteConfigured && tab.connectionProtocol !== 'none') {
+        endpoint = `/infra/devices/${tab.deviceId}/remote/exec`;
+    }
+    
+    try {
+        const response = await fetch(endpoint, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ command: cmd })
+        });
+        
+        const data = await response.json();
+        
+        if (data.lines && data.lines.length > 0) {
+            const output = document.getElementById(`output-${tabId}`);
+            if (!output) return;
+            
+            for (const log of data.lines) {
+                // Skip the "$ command" echo from backend since we already showed it
+                if (log.text.startsWith('$ ')) continue;
+                
+                const now = new Date();
+                const timeStr = now.toLocaleTimeString('en-US', { hour12: false, hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                
+                const line = document.createElement('div');
+                line.className = `terminal-line ${log.type}`;
+                line.innerHTML = `<span class="time">${timeStr}</span><span class="text">${escapeHtml(log.text)}</span>`;
+                output.appendChild(line);
+            }
+            
+            output.scrollTop = output.scrollHeight;
+        }
+    } catch (e) {
+        appendTerminalLine(tabId, `Error: ${e.message}`, 'error');
+    }
+}

@@ -1,10 +1,14 @@
 """
-Long-Term Memory Module
+Long-Term Memory Module — Network Intelligence
 
 Enhanced memory for the agent:
 - Solution caching for troubleshooting
 - User preferences storage
 - Learned patterns from past interactions
+- Network event history (diagnostics, anomalies)
+- Network baselines (learned "normal" per device/metric)
+
+Inspired by OpenClaw's persistent and adaptive memory system.
 """
 import os
 import json
@@ -118,6 +122,34 @@ class LongTermMemory:
         cursor.execute("""
             CREATE VIRTUAL TABLE IF NOT EXISTS solutions_fts 
             USING fts5(problem, solution, category, content=solutions, content_rowid=id)
+        """)
+        
+        # Network events table — records every significant network event
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS network_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_ip TEXT,
+                event_type TEXT,
+                event_data TEXT,
+                severity TEXT DEFAULT 'info',
+                source TEXT DEFAULT 'manual',
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )
+        """)
+        
+        # Network baselines — learned "normal" values per device/metric
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS network_baselines (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_ip TEXT,
+                metric_type TEXT,
+                baseline_value REAL,
+                threshold_low REAL,
+                threshold_high REAL,
+                sample_count INTEGER DEFAULT 0,
+                updated_at TEXT DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(device_ip, metric_type)
+            )
         """)
         
         conn.commit()
@@ -397,6 +429,201 @@ class LongTermMemory:
     
     # ============= Stats =============
     
+    # ============= NETWORK INTELLIGENCE =============
+    
+    def record_event(self, device_ip: str, event_type: str, 
+                     event_data: Dict, severity: str = "info",
+                     source: str = "manual") -> int:
+        """Record a network event for historical analysis"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            INSERT INTO network_events (device_ip, event_type, event_data, severity, source, created_at)
+            VALUES (?, ?, ?, ?, ?, ?)
+        """, (
+            device_ip, event_type, json.dumps(event_data),
+            severity, source, datetime.now().isoformat()
+        ))
+        
+        event_id = cursor.lastrowid
+        conn.commit()
+        conn.close()
+        return event_id
+    
+    def get_device_history(self, device_ip: str, event_type: str = None,
+                           limit: int = 20) -> List[Dict]:
+        """Get event history for a device"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        if event_type:
+            cursor.execute("""
+                SELECT id, device_ip, event_type, event_data, severity, source, created_at
+                FROM network_events
+                WHERE device_ip = ? AND event_type = ?
+                ORDER BY created_at DESC LIMIT ?
+            """, (device_ip, event_type, limit))
+        else:
+            cursor.execute("""
+                SELECT id, device_ip, event_type, event_data, severity, source, created_at
+                FROM network_events
+                WHERE device_ip = ?
+                ORDER BY created_at DESC LIMIT ?
+            """, (device_ip, limit))
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [
+            {
+                "id": r[0], "device_ip": r[1], "event_type": r[2],
+                "event_data": json.loads(r[3]) if r[3] else {},
+                "severity": r[4], "source": r[5], "created_at": r[6]
+            }
+            for r in rows
+        ]
+    
+    def update_baseline(self, device_ip: str, metric_type: str, value: float):
+        """Update the baseline for a device metric using rolling average"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        # Check if baseline exists
+        cursor.execute("""
+            SELECT baseline_value, sample_count, threshold_low, threshold_high
+            FROM network_baselines
+            WHERE device_ip = ? AND metric_type = ?
+        """, (device_ip, metric_type))
+        
+        row = cursor.fetchone()
+        now = datetime.now().isoformat()
+        
+        if row:
+            old_avg, count, _, _ = row
+            new_count = count + 1
+            # Rolling average
+            new_avg = old_avg + (value - old_avg) / new_count
+            # Thresholds: ±30% of baseline (adaptive)
+            threshold_low = new_avg * 0.5
+            threshold_high = new_avg * 2.0
+            
+            cursor.execute("""
+                UPDATE network_baselines
+                SET baseline_value = ?, threshold_low = ?, threshold_high = ?,
+                    sample_count = ?, updated_at = ?
+                WHERE device_ip = ? AND metric_type = ?
+            """, (new_avg, threshold_low, threshold_high, new_count, now,
+                   device_ip, metric_type))
+        else:
+            # First measurement — initialize baseline
+            cursor.execute("""
+                INSERT INTO network_baselines 
+                (device_ip, metric_type, baseline_value, threshold_low, threshold_high, sample_count, updated_at)
+                VALUES (?, ?, ?, ?, ?, 1, ?)
+            """, (device_ip, metric_type, value, value * 0.5, value * 2.0, now))
+        
+        conn.commit()
+        conn.close()
+    
+    def get_baseline(self, device_ip: str, metric_type: str) -> Optional[Dict]:
+        """Get the learned baseline for a device metric"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        cursor.execute("""
+            SELECT baseline_value, threshold_low, threshold_high, sample_count, updated_at
+            FROM network_baselines
+            WHERE device_ip = ? AND metric_type = ?
+        """, (device_ip, metric_type))
+        
+        row = cursor.fetchone()
+        conn.close()
+        
+        if not row:
+            return None
+        
+        return {
+            "device_ip": device_ip,
+            "metric_type": metric_type,
+            "baseline_value": row[0],
+            "threshold_low": row[1],
+            "threshold_high": row[2],
+            "sample_count": row[3],
+            "updated_at": row[4],
+        }
+    
+    def is_anomalous(self, device_ip: str, metric_type: str, 
+                      current_value: float) -> Dict:
+        """Check if a current value is anomalous compared to baseline"""
+        baseline = self.get_baseline(device_ip, metric_type)
+        
+        if not baseline or baseline["sample_count"] < 3:
+            return {
+                "anomalous": False,
+                "reason": "Insufficient baseline data (need at least 3 samples)",
+                "current_value": current_value,
+                "baseline": baseline
+            }
+        
+        is_low = current_value < baseline["threshold_low"]
+        is_high = current_value > baseline["threshold_high"]
+        
+        if is_low or is_high:
+            direction = "below" if is_low else "above"
+            threshold = baseline["threshold_low"] if is_low else baseline["threshold_high"]
+            return {
+                "anomalous": True,
+                "reason": f"Value {current_value} is {direction} threshold {threshold:.2f}",
+                "current_value": current_value,
+                "baseline_value": baseline["baseline_value"],
+                "threshold_low": baseline["threshold_low"],
+                "threshold_high": baseline["threshold_high"],
+                "sample_count": baseline["sample_count"],
+            }
+        
+        return {
+            "anomalous": False,
+            "reason": "Value is within normal range",
+            "current_value": current_value,
+            "baseline_value": baseline["baseline_value"],
+        }
+    
+    def get_all_baselines(self, device_ip: str = None) -> List[Dict]:
+        """Get all baselines, optionally filtered by device"""
+        conn = self._get_connection()
+        cursor = conn.cursor()
+        
+        if device_ip:
+            cursor.execute("""
+                SELECT device_ip, metric_type, baseline_value, threshold_low, 
+                       threshold_high, sample_count, updated_at
+                FROM network_baselines WHERE device_ip = ?
+                ORDER BY metric_type
+            """, (device_ip,))
+        else:
+            cursor.execute("""
+                SELECT device_ip, metric_type, baseline_value, threshold_low, 
+                       threshold_high, sample_count, updated_at
+                FROM network_baselines
+                ORDER BY device_ip, metric_type
+            """)
+        
+        rows = cursor.fetchall()
+        conn.close()
+        
+        return [
+            {
+                "device_ip": r[0], "metric_type": r[1],
+                "baseline_value": r[2], "threshold_low": r[3],
+                "threshold_high": r[4], "sample_count": r[5],
+                "updated_at": r[6]
+            }
+            for r in rows
+        ]
+    
+    # ============= STATS =============
+    
     def get_memory_stats(self) -> Dict[str, Any]:
         """Get memory statistics"""
         conn = self._get_connection()
@@ -414,13 +641,22 @@ class LongTermMemory:
         cursor.execute("SELECT SUM(success_count) FROM solutions")
         total_uses = cursor.fetchone()[0] or 0
         
+        # Network intelligence stats
+        cursor.execute("SELECT COUNT(*) FROM network_events")
+        events_count = cursor.fetchone()[0]
+        
+        cursor.execute("SELECT COUNT(*) FROM network_baselines")
+        baselines_count = cursor.fetchone()[0]
+        
         conn.close()
         
         return {
             "solutions_stored": solutions_count,
             "preferences_count": prefs_count,
             "patterns_learned": patterns_count,
-            "total_solution_uses": total_uses
+            "total_solution_uses": total_uses,
+            "network_events": events_count,
+            "network_baselines": baselines_count,
         }
 
 
