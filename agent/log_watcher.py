@@ -341,7 +341,6 @@ class LogWatcher:
                     asyncio.create_task(self._check_device_logs(ip, config))
                     config.last_check = now
             
-            # Sleep before next iteration
             await asyncio.sleep(5)
     
     async def _check_device_logs(self, device_ip: str, config: DeviceWatchConfig):
@@ -439,6 +438,9 @@ class LogWatcher:
             f"{pattern.description} — {log_line.strip()[:100]}"
         )
         
+        # Auto-embed anomaly to ChromaDB for future RAG
+        await self._store_anomaly_to_knowledge(anomaly)
+        
         # Create alert
         try:
             from agent.alerting import alert_manager
@@ -453,6 +455,109 @@ class LogWatcher:
             logger.error(f"Failed to create alert: {e}")
         
         return anomaly
+    
+    # ============= CHROMADB INTEGRATION =============
+    
+    async def _store_anomaly_to_knowledge(self, anomaly: DetectedAnomaly):
+        """Auto-embed anomaly into ChromaDB as an 'incident' document.
+        
+        Every detected anomaly is stored so that future similar incidents
+        can find this record via semantic search.
+        """
+        try:
+            from agent.rag_knowledge import get_knowledge_base
+            kb = get_knowledge_base()
+            
+            content = (
+                f"Device: {anomaly.device_name} ({anomaly.device_ip})\n"
+                f"Type: {anomaly.pattern_name}\n"
+                f"Severity: {anomaly.severity}\n"
+                f"Description: {anomaly.description}\n"
+                f"Log: {anomaly.log_line}\n"
+                f"Time: {anomaly.timestamp}"
+            )
+            
+            kb.add_document(
+                title=f"Incident: {anomaly.description} on {anomaly.device_name}",
+                content=content,
+                category="incident",
+                tags=[anomaly.device_ip, anomaly.pattern_name, anomaly.severity]
+            )
+            
+            logger.info(f"📝 Anomaly {anomaly.id} stored to ChromaDB knowledge base")
+        except Exception as e:
+            logger.debug(f"Could not store anomaly to ChromaDB: {e}")
+    
+    async def _search_similar_incidents(self, anomaly: DetectedAnomaly) -> str:
+        """Search ChromaDB for similar past incidents and solutions.
+        
+        Returns formatted context string for the agent prompt.
+        """
+        try:
+            from agent.rag_knowledge import get_knowledge_base
+            kb = get_knowledge_base()
+            
+            query = f"{anomaly.description} {anomaly.log_line} {anomaly.device_name}"
+            
+            # Search for past incidents
+            incidents = kb.search(query, k=3, category="incident")
+            # Search for past solutions
+            solutions = kb.search(query, k=2, category="solution")
+            
+            if not incidents and not solutions:
+                return ""
+            
+            parts = ["\n=== KONTEKS DARI INSIDEN SEBELUMNYA (RAG) ==="]
+            
+            if incidents:
+                parts.append("\n📋 Insiden serupa yang pernah terjadi:")
+                for i, doc in enumerate(incidents, 1):
+                    title = doc.metadata.get("title", "")
+                    parts.append(f"{i}. {title}")
+                    parts.append(f"   {doc.page_content[:300]}")
+            
+            if solutions:
+                parts.append("\n✅ Solusi yang pernah berhasil:")
+                for i, doc in enumerate(solutions, 1):
+                    title = doc.metadata.get("title", "")
+                    parts.append(f"{i}. {title}")
+                    parts.append(f"   {doc.page_content[:300]}")
+            
+            parts.append("\nGunakan informasi di atas sebagai referensi untuk investigasi saat ini.")
+            
+            context = "\n".join(parts)
+            logger.info(f"🔍 Found {len(incidents)} similar incidents, {len(solutions)} past solutions for {anomaly.id}")
+            return context
+            
+        except Exception as e:
+            logger.debug(f"Could not search ChromaDB for similar incidents: {e}")
+            return ""
+    
+    async def _save_investigation_result(self, anomaly: DetectedAnomaly, agent_response: str):
+        """Save the agent's investigation result back to ChromaDB as a 'solution'.
+        
+        This enables learning — future similar incidents will find this solution.
+        """
+        try:
+            from agent.rag_knowledge import get_knowledge_base
+            kb = get_knowledge_base()
+            
+            content = (
+                f"Problem: {anomaly.description} on {anomaly.device_name} ({anomaly.device_ip})\n"
+                f"Log: {anomaly.log_line}\n"
+                f"Investigation & Solution:\n{agent_response[:1500]}"
+            )
+            
+            kb.add_document(
+                title=f"Solution: {anomaly.pattern_name} on {anomaly.device_name}",
+                content=content,
+                category="solution",
+                tags=[anomaly.device_ip, anomaly.pattern_name, "auto-investigated"]
+            )
+            
+            logger.info(f"💡 Investigation result for {anomaly.id} saved to ChromaDB")
+        except Exception as e:
+            logger.debug(f"Could not save investigation result to ChromaDB: {e}")
     
     async def _trigger_agent(self, anomaly: DetectedAnomaly):
         """Trigger the agent to investigate AND remediate an anomaly.
@@ -470,13 +575,17 @@ class LogWatcher:
             device_config.auto_remediate
         )
         
+        # Search ChromaDB for similar past incidents before triggering agent
+        rag_context = await self._search_similar_incidents(anomaly)
+        
         if use_remediation:
             # Build remediation-aware prompt
             message = (
                 f"[AUTO-REMEDIATION] Anomali terdeteksi pada device {anomaly.device_name} ({anomaly.device_ip}).\n"
                 f"Severity: {anomaly.severity}\n"
                 f"Tipe: {anomaly.description}\n"
-                f"Log: {anomaly.log_line}\n\n"
+                f"Log: {anomaly.log_line}\n"
+                f"{rag_context}\n\n"
                 f"=== RUNBOOK REMEDIASI ===\n"
                 f"{runbook['prompt']}\n\n"
                 f"Instruksi tambahan:\n"
@@ -493,12 +602,13 @@ class LogWatcher:
             )
             mode = "remediation"
         else:
-            # Investigation-only prompt (original behavior)
+            # Investigation-only prompt with RAG context
             message = (
                 f"[AUTO-MONITOR] Anomali terdeteksi pada device {anomaly.device_name} ({anomaly.device_ip}).\n"
                 f"Severity: {anomaly.severity}\n"
                 f"Tipe: {anomaly.description}\n"
-                f"Log: {anomaly.log_line}\n\n"
+                f"Log: {anomaly.log_line}\n"
+                f"{rag_context}\n\n"
                 f"Lakukan investigasi singkat: cek status device (ping), cek interface, "
                 f"dan berikan analisis penyebab serta rekomendasi."
             )
@@ -550,6 +660,10 @@ class LogWatcher:
             logger.info(
                 f"🤖 Agent {mode} for anomaly {anomaly.id} in thread {thread_id}"
             )
+            
+            # Save investigation result to ChromaDB for future learning
+            await self._save_investigation_result(anomaly, response)
+            
         except Exception as e:
             logger.error(f"Failed to trigger agent for {anomaly.id}: {e}")
     
