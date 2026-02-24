@@ -59,6 +59,8 @@ async def add_device(request: DeviceRequest):
         device.ssh_username = request.ssh_username
         device.ssh_password = request.ssh_password
         device.ssh_port = request.ssh_port
+        # Save again to persist credentials to database
+        infrastructure._save_device_to_db(device)
     return {"success": True, "message": f"Device '{device.name}' added", "device": device.to_dict()}
 
 
@@ -237,6 +239,63 @@ async def get_device_logs(device_id: str, limit: int = 50):
         "device_status": device.status.value,
         "logs": logs
     }
+
+# --- Fetch Device System Logs (via SSH/Telnet) ---
+
+LOG_COMMANDS = {
+    "router": "/log print without-paging",
+    "switch": "show logging",
+    "server": "journalctl -n 200 --no-pager",
+    "firewall": "show logging",
+    "access_point": "/log print without-paging",
+    "pc": "Get-EventLog -LogName System -Newest 100 | Format-Table -AutoSize",
+    "other": "cd /var/log/ && cat syslog | tail -n 200",
+}
+
+@router.get("/infra/devices/{device_id}/fetch-logs")
+async def fetch_device_system_logs(device_id: str):
+    """Fetch system logs from a device via SSH/Telnet using auto-detected log command"""
+    device = infrastructure.get_device(device_id)
+    if not device:
+        return {"success": False, "data": {"logs": []}, "error": "Device not found"}
+    
+    if not device.ssh_username or device.connection_protocol == "none":
+        return {
+            "success": False,
+            "data": {"logs": []},
+            "error": f"Remote access not configured for {device.name}. Edit device to add SSH/Telnet credentials."
+        }
+    
+    # Determine log command based on device type
+    device_type = device.type.value.lower()
+    log_cmd = LOG_COMMANDS.get(device_type, "/log print without-paging")
+    
+    # Reuse existing remote exec infrastructure
+    request_obj = SSHCommand(command=log_cmd)
+    
+    if device.connection_protocol == "ssh":
+        result = await ssh_execute_command(device_id, request_obj)
+    elif device.connection_protocol == "telnet":
+        result = await telnet_execute_command(device_id, request_obj)
+    else:
+        return {
+            "success": False,
+            "data": {"logs": []},
+            "error": f"Unknown protocol: {device.connection_protocol}"
+        }
+    
+    # Parse lines from remote exec result into flat log strings
+    lines = result.get("lines", [])
+    log_lines = [entry.get("text", "") for entry in lines if entry.get("text", "").strip()]
+    
+    return {
+        "success": True,
+        "data": {"logs": log_lines},
+        "device_name": device.name,
+        "device_ip": device.ip,
+        "command": log_cmd
+    }
+
 
 # --- Terminal Command Execution ---
 

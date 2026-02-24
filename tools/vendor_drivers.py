@@ -121,7 +121,7 @@ class CommandTranslator:
             UnifiedCommand.GET_ARP_TABLE: "/ip arp print",
             UnifiedCommand.GET_MAC_TABLE: "/interface bridge host print",
             UnifiedCommand.GET_RUNNING_CONFIG: "/export",
-            UnifiedCommand.GET_LOGS: "/log print last=50",
+            UnifiedCommand.GET_LOGS: "var/log/syslog print last=50",
             UnifiedCommand.PING: "/ping {target} count=5",
             UnifiedCommand.TRACEROUTE: "/tool traceroute {target}",
             UnifiedCommand.SHUTDOWN_INTERFACE: "/interface disable {interface}",

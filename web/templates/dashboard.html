@@ -389,6 +389,10 @@
                         <span class="icon"><svg><use href="#icon-bell"/></svg></span>
                         Alerts
                     </button>
+                    <button class="content-tab" onclick="switchMainTab('logs')">
+                        <span class="icon"><svg><use href="#icon-terminal"/></svg></span>
+                        Logs
+                    </button>
                 </div>
 
                 <!-- Devices Tab -->
@@ -575,6 +579,36 @@
                         </div>
                     </div>
                 </div>
+
+                <!-- Logs Tab -->
+                <div id="main-tab-logs" class="main-tab-panel">
+                    <div class="log-viewer-toolbar">
+                        <select id="log-device-select" class="log-filter-select" onchange="fetchDeviceLogViewer()">
+                            <option value="">-- Select Device --</option>
+                        </select>
+                        <div class="log-search-wrapper">
+                            <span class="icon icon-sm"><svg><use href="#icon-search"/></svg></span>
+                            <input type="text" id="log-search-input" class="log-search-input" 
+                                   placeholder="Filter logs..." oninput="filterDeviceLogs()">
+                        </div>
+                        <button class="log-toolbar-btn" id="log-refresh-btn" onclick="fetchDeviceLogViewer()" title="Refresh">
+                            <span class="icon icon-sm"><svg><use href="#icon-refresh"/></svg></span>
+                        </button>
+                        <button class="log-toolbar-btn" id="log-auto-refresh-btn" onclick="toggleLogAutoRefresh()" title="Auto Refresh">
+                            <span class="icon icon-sm"><svg><use href="#icon-activity"/></svg></span>
+                            <span id="log-auto-text">Auto</span>
+                        </button>
+                        <span class="log-count-badge" id="log-count-badge">0 lines</span>
+                    </div>
+                    <div class="log-viewer-output" id="log-viewer-output">
+                        <div class="log-empty-state">
+                            <span class="icon icon-xl"><svg><use href="#icon-terminal"/></svg></span>
+                            <p>Select a device to view its logs</p>
+                        </div>
+                    </div>
+                </div>
+
+
             </div>
         </section>
 

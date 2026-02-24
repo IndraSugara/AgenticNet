@@ -2088,7 +2088,200 @@ document.addEventListener('DOMContentLoaded', () => {
     setTimeout(checkLogWatchStatus, 1000);
 });
 
+// ============= DEVICE LOG VIEWER =============
+
+let logAutoRefreshRunning = false;
+let logAutoRefreshInterval = null;
+let cachedDeviceLogLines = []; // Store raw lines for client-side filtering
+
+async function populateLogDeviceSelector() {
+    const select = document.getElementById('log-device-select');
+    if (!select) return;
+    
+    // Keep current selection
+    const currentVal = select.value;
+    
+    try {
+        const response = await fetch('/infra/devices');
+        const data = await response.json();
+        
+        const devices = data.devices || [];
+        
+        // Clear and rebuild options
+        select.innerHTML = '<option value="">-- Select Device --</option>';
+        
+        for (const dev of devices) {
+            const opt = document.createElement('option');
+            opt.value = dev.id;
+            opt.textContent = `${dev.name} (${dev.ip})`;
+            select.appendChild(opt);
+        }
+        
+        // Restore previous selection
+        if (currentVal) select.value = currentVal;
+    } catch (e) {
+        console.error('Failed to populate log device selector:', e);
+    }
+}
+
+async function fetchDeviceLogViewer() {
+    const select = document.getElementById('log-device-select');
+    const deviceId = select?.value;
+    const output = document.getElementById('log-viewer-output');
+    
+    if (!deviceId) {
+        if (output) {
+            output.innerHTML = `
+                <div class="log-empty-state">
+                    <span class="icon icon-xl"><svg><use href="#icon-terminal"/></svg></span>
+                    <p>Select a device to view its logs</p>
+                </div>`;
+        }
+        cachedDeviceLogLines = [];
+        updateLogCount(0);
+        return;
+    }
+    
+    // Show loading state
+    if (output) {
+        output.innerHTML = `
+            <div class="log-empty-state">
+                <span class="icon icon-xl"><svg><use href="#icon-refresh"/></svg></span>
+                <p>Fetching logs from device...</p>
+            </div>`;
+    }
+    
+    try {
+        const response = await fetch(`/infra/devices/${deviceId}/fetch-logs`);
+        const data = await response.json();
+        
+        if (!data.success) {
+            if (output) {
+                output.innerHTML = `
+                    <div class="log-empty-state">
+                        <span class="icon icon-xl"><svg><use href="#icon-alert-triangle"/></svg></span>
+                        <p>${escapeHtml(data.error || 'Failed to fetch device logs')}</p>
+                    </div>`;
+            }
+            cachedDeviceLogLines = [];
+            updateLogCount(0);
+            return;
+        }
+        
+        const logs = data.data?.logs || [];
+        cachedDeviceLogLines = logs;
+        renderDeviceLogLines(logs);
+        
+    } catch (e) {
+        console.error('Fetch device logs failed:', e);
+        if (output) {
+            output.innerHTML = `
+                <div class="log-empty-state">
+                    <p>Error: ${escapeHtml(e.message)}</p>
+                </div>`;
+        }
+        cachedDeviceLogLines = [];
+        updateLogCount(0);
+    }
+}
+
+function renderDeviceLogLines(lines) {
+    const output = document.getElementById('log-viewer-output');
+    if (!output) return;
+    
+    if (!lines || lines.length === 0) {
+        output.innerHTML = `
+            <div class="log-empty-state">
+                <span class="icon icon-xl"><svg><use href="#icon-terminal"/></svg></span>
+                <p>No log entries on this device</p>
+            </div>`;
+        updateLogCount(0);
+        return;
+    }
+    
+    output.innerHTML = lines.map(line => {
+        const escaped = escapeHtml(line);
+        // Detect severity keywords for color coding
+        let cls = 'log-info';
+        const lower = line.toLowerCase();
+        if (lower.includes('error') || lower.includes('critical') || lower.includes('fail')) {
+            cls = 'log-error';
+        } else if (lower.includes('warning') || lower.includes('warn')) {
+            cls = 'log-warning';
+        } else if (lower.includes('debug') || lower.includes('trace')) {
+            cls = 'log-debug';
+        }
+        return `<div class="log-entry ${cls}"><span class="log-message">${escaped}</span></div>`;
+    }).join('');
+    
+    updateLogCount(lines.length);
+    
+    // Scroll to bottom (latest logs)
+    output.scrollTop = output.scrollHeight;
+}
+
+function filterDeviceLogs() {
+    const searchVal = document.getElementById('log-search-input')?.value?.toLowerCase() || '';
+    
+    if (!searchVal) {
+        renderDeviceLogLines(cachedDeviceLogLines);
+        return;
+    }
+    
+    const filtered = cachedDeviceLogLines.filter(line => line.toLowerCase().includes(searchVal));
+    renderDeviceLogLines(filtered);
+}
+
+function updateLogCount(count) {
+    const badge = document.getElementById('log-count-badge');
+    if (badge) badge.textContent = `${count} lines`;
+}
+
+function toggleLogAutoRefresh() {
+    const btn = document.getElementById('log-auto-refresh-btn');
+    const text = document.getElementById('log-auto-text');
+    
+    if (logAutoRefreshRunning) {
+        logAutoRefreshRunning = false;
+        if (logAutoRefreshInterval) {
+            clearInterval(logAutoRefreshInterval);
+            logAutoRefreshInterval = null;
+        }
+        if (btn) btn.classList.remove('active');
+        if (text) text.textContent = 'Auto';
+    } else {
+        logAutoRefreshRunning = true;
+        fetchDeviceLogViewer();
+        logAutoRefreshInterval = setInterval(fetchDeviceLogViewer, 5000);
+        if (btn) btn.classList.add('active');
+        if (text) text.textContent = 'Live';
+    }
+}
+
+// Auto-populate devices when Logs tab is opened
+const _origSwitchMainTab = typeof switchMainTab === 'function' ? switchMainTab : null;
+function switchMainTabWithLogs(tabName) {
+    // Call original tab switching logic
+    document.querySelectorAll('.content-tab').forEach(tab => tab.classList.remove('active'));
+    document.querySelectorAll('.main-tab-panel').forEach(panel => panel.classList.remove('active'));
+    
+    if (event && event.target) {
+        event.target.closest('.content-tab').classList.add('active');
+    }
+    const panel = document.getElementById(`main-tab-${tabName}`);
+    if (panel) panel.classList.add('active');
+    
+    // Populate device selector and auto-fetch when switching to logs tab
+    if (tabName === 'logs') {
+        populateLogDeviceSelector();
+    }
+}
+// Override switchMainTab
+switchMainTab = switchMainTabWithLogs;
+
 // ============= TERMINAL PANEL =============
+
+
 
 let terminalOpen = false;
 let terminalMaximized = false;

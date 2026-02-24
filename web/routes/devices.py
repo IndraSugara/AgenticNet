@@ -157,7 +157,7 @@ async def get_device_arp(device_ip: str):
     return result.to_dict()
 
 
-@router.get("/device/{device_ip}/logs")
+@router.get("/device/{device_ip}var/log/syslog")
 async def get_device_logs(device_ip: str):
     """Get recent logs from device"""
     result = await unified_commands.get_logs(device_ip)
