@@ -1,0 +1,112 @@
+version: "3.9"
+
+networks:
+  monitoring:
+    driver: bridge
+
+volumes:
+  loki-data:
+
+services:
+  # ─── Loki: Log Storage ──────────────────────────────────────────────────────
+  loki:
+    image: grafana/loki:3.0.0
+    container_name: loki
+    networks:
+      - monitoring
+    ports:
+      - "3100:3100"
+    volumes:
+      - ./loki-config.yaml:/etc/loki/local-config.yaml
+      - loki-data:/loki
+    command: -config.file=/etc/loki/local-config.yaml
+    healthcheck:
+      test: ["CMD", "wget", "--quiet", "--tries=1", "--spider", "http://localhost:3100/ready"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
+
+  # ─── OpenTelemetry Collector: Syslog → Loki Pipeline ───────────────────────
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib:0.96.0
+    container_name: otel-collector
+    networks:
+      - monitoring
+    ports:
+      - "514:514/udp"   # Syslog UDP from network devices
+      - "4317:4317"     # gRPC OTLP
+      - "4318:4318"     # HTTP OTLP
+    volumes:
+      - ./otel-config.yaml:/etc/otel/config.yaml
+    command: --config=/etc/otel/config.yaml
+    depends_on:
+      loki:
+        condition: service_healthy
+    restart: unless-stopped
+
+  # ─── SNMP Trap Receiver: Device Trap → syslog → OTel ───────────────────────
+  snmptrapd:
+    build:
+      context: ./snmptrapd
+      dockerfile: Dockerfile
+    container_name: snmptrapd
+    networks:
+      - monitoring
+    ports:
+      - "162:162/udp"   # SNMP Trap UDP from network devices
+    environment:
+      OTEL_HOST: otel-collector
+      OTEL_PORT: "514"
+    depends_on:
+      - otel-collector
+    restart: unless-stopped
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "5m"
+        max-file: "3"
+
+  # ─── AgenticNet: AI Network Agent ───────────────────────────────────────────
+  agenticnet:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: agenticnet
+    image: agenticnet:latest
+    networks:
+      - monitoring
+    ports:
+      - "8000:8000"
+
+    # Load environment variables dari file .env
+    env_file:
+      - .env
+
+    # Volume: persist semua data (SQLite DB, ChromaDB, logs, reports)
+    volumes:
+      - ./data:/app/data
+
+    depends_on:
+      loki:
+        condition: service_healthy
+
+    # Restart otomatis kecuali di-stop manual
+    restart: unless-stopped
+
+    # Health check
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 15s
+
+    # Logging: batasi ukuran log agar tidak penuh
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+

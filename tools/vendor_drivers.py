@@ -20,7 +20,78 @@ except ImportError:
     NETMIKO_AVAILABLE = False
     print("⚠️ Netmiko not installed. Device connections disabled.")
 
-from modules.inventory import inventory, DeviceInfo, VendorType, DeviceCredentials
+from modules.inventory import inventory, DeviceInfo, VendorType, DeviceRole, DeviceCredentials
+
+
+def _resolve_device(ip_or_name: str) -> "Optional[DeviceInfo]":
+    """
+    Resolve DeviceInfo from inventory, falling back to InfrastructureManager.
+
+    This bridges the two device stores so that devices added via the agent
+    (stored in data/devices.db via infrastructure.py) are also reachable by
+    vendor_drivers even when they haven't been explicitly added to inventory.db.
+    """
+    # Primary source: InventoryModule (data/inventory.db)
+    device = inventory.get_device(ip_or_name)
+    if device:
+        return device
+
+    # Fallback: InfrastructureManager (data/devices.db)
+    try:
+        from agent.infrastructure import infrastructure
+
+        infra_device = None
+        for d in infrastructure.devices.values():
+            if d.ip == ip_or_name or d.name == ip_or_name:
+                infra_device = d
+                break
+
+        if not infra_device:
+            return None
+
+        type_to_role = {
+            "router": DeviceRole.ROUTER,
+            "switch": DeviceRole.SWITCH,
+            "server": DeviceRole.SERVER,
+            "firewall": DeviceRole.FIREWALL,
+            "access_point": DeviceRole.ACCESS_POINT,
+        }
+        role = type_to_role.get(infra_device.type.value, DeviceRole.OTHER)
+        vendor = inventory.detect_vendor(infra_device.name)
+
+        # Determine credential id for this device
+        cred_id = "default"
+        if infra_device.ssh_username:
+            # Cache ad-hoc credentials so get_connection_params can find them
+            cred_id = f"infra_{infra_device.id}"
+            if cred_id not in inventory._credentials_cache:
+                inventory._credentials_cache[cred_id] = DeviceCredentials(
+                    username=infra_device.ssh_username,
+                    password=infra_device.ssh_password,
+                )
+
+        dev_info = DeviceInfo(
+            id=infra_device.id,
+            name=infra_device.name,
+            ip_address=infra_device.ip,
+            vendor=vendor,
+            role=role,
+            location=infra_device.location,
+            description=infra_device.description,
+            ssh_port=infra_device.ssh_port,
+            credential_id=cred_id,
+            enabled=infra_device.enabled,
+        )
+
+        # Warm the inventory cache so subsequent lookups are instant
+        inventory._cache[infra_device.ip] = dev_info
+        inventory._cache[infra_device.name] = dev_info
+
+        return dev_info
+
+    except Exception as e:
+        print(f"⚠️ Infrastructure fallback failed for '{ip_or_name}': {e}")
+        return None
 
 
 @dataclass
@@ -65,6 +136,7 @@ class UnifiedCommand(Enum):
     SHUTDOWN_INTERFACE = "shutdown_interface"
     NO_SHUTDOWN_INTERFACE = "no_shutdown_interface"
     SET_VLAN = "set_vlan"
+    RESTART = "restart"
 
 
 class CommandTranslator:
@@ -160,6 +232,23 @@ class CommandTranslator:
             UnifiedCommand.PING: "ping -c 5 {target}",
             UnifiedCommand.TRACEROUTE: "traceroute {target}",
         },
+        VendorType.HP_COMWARE: {
+            UnifiedCommand.GET_HOSTNAME: "display current-configuration | include sysname",
+            UnifiedCommand.GET_VERSION: "display version",
+            UnifiedCommand.GET_INTERFACES: "display ip interface brief",
+            UnifiedCommand.GET_INTERFACE_STATUS: "display interface brief",
+            UnifiedCommand.GET_INTERFACE_TRAFFIC: "display interface {interface}",
+            UnifiedCommand.GET_CPU_LOAD: "display cpu-usage",
+            UnifiedCommand.GET_MEMORY_USAGE: "display memory-usage",
+            UnifiedCommand.GET_ROUTING_TABLE: "display ip routing-table",
+            UnifiedCommand.GET_ARP_TABLE: "display arp",
+            UnifiedCommand.GET_MAC_TABLE: "display mac-address",
+            UnifiedCommand.GET_RUNNING_CONFIG: "display current-configuration",
+            UnifiedCommand.GET_LOGS: "display logbuffer",
+            UnifiedCommand.RESTART: "reboot",
+            UnifiedCommand.PING: "ping {target}",
+            UnifiedCommand.TRACEROUTE: "tracert {target}",
+        }
     }
     
     @classmethod
@@ -412,13 +501,13 @@ class ConnectionManager:
         Returns:
             CommandResult
         """
-        # Get device from inventory
-        device = inventory.get_device(device_ip)
+        # Get device from inventory (with infra fallback)
+        device = _resolve_device(device_ip)
         if not device:
             return CommandResult(
                 success=False,
                 output="",
-                error=f"Device {device_ip} not found in inventory",
+                error=f"Device {device_ip} tidak ditemukan di inventory",
                 device_name=device_ip,
                 command=unified_cmd.value
             )
@@ -468,12 +557,12 @@ class ConnectionManager:
         Returns:
             CommandResult
         """
-        device = inventory.get_device(device_ip)
+        device = _resolve_device(device_ip)
         if not device:
             return CommandResult(
                 success=False,
                 output="",
-                error=f"Device {device_ip} not found in inventory",
+                error=f"Device {device_ip} tidak ditemukan di inventory",
                 device_name=device_ip,
                 command=raw_command
             )

@@ -1,0 +1,40 @@
+# Git
+.git
+.gitignore
+
+# Python cache
+__pycache__
+*.py[cod]
+*.pyo
+*.pyc
+.pytest_cache
+*.egg-info
+dist/
+build/
+
+# Virtual environments
+.venv
+venv
+env
+
+# Data dir — di-mount sebagai volume, tidak perlu di-copy ke image
+data/
+
+# Environment file — jangan pernah di-copy ke image!
+.env
+
+# IDE / Editor
+.vscode
+.idea
+*.swp
+*.swo
+.qodo
+
+# Test files
+test_*.py
+*.test.js
+
+# Docs & miscellaneous
+README.md
+*.md
+*.log

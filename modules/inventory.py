@@ -29,6 +29,7 @@ class VendorType(Enum):
     CISCO_NXOS = "cisco_nxos"
     MIKROTIK = "mikrotik_routeros"
     UBIQUITI_EDGE = "ubiquiti_edgerouter"
+    HP_COMWARE = "hp_comware"
     LINUX = "linux"
     UNKNOWN = "unknown"
 
@@ -119,6 +120,10 @@ class InventoryModule:
         VendorType.CISCO_NXOS: ["nexus", "nxos"],
         VendorType.MIKROTIK: ["mikrotik", "routeros", "routerboard"],
         VendorType.UBIQUITI_EDGE: ["ubiquiti", "edgerouter", "edgemax", "unifi"],
+        VendorType.HP_COMWARE: ["hp", "hpe", "procurve", "aruba", "comware",
+                                   "v1910", "v1920", "v1950", "je006", "je007", "je008",
+                                   "1910", "1920", "1950", "2510", "2520",
+                                   "2910", "2920", "2930", "3800", "5400", "5500"],
         VendorType.LINUX: ["linux", "ubuntu", "debian", "centos", "rhel"],
     }
     
@@ -128,6 +133,7 @@ class InventoryModule:
         VendorType.CISCO_NXOS: 22,
         VendorType.MIKROTIK: 22,
         VendorType.UBIQUITI_EDGE: 22,
+        VendorType.HP_COMWARE: 22,
         VendorType.LINUX: 22,
         VendorType.UNKNOWN: 22,
     }
@@ -514,6 +520,7 @@ class InventoryModule:
             VendorType.CISCO_NXOS: "cisco_nxos",
             VendorType.MIKROTIK: "mikrotik_routeros",
             VendorType.UBIQUITI_EDGE: "ubiquiti_edge",
+            VendorType.HP_COMWARE: "hp_comware",
             VendorType.LINUX: "linux",
             VendorType.UNKNOWN: "generic_termserver",
         }
@@ -534,6 +541,14 @@ class InventoryModule:
         if creds.ssh_key_path and os.path.exists(creds.ssh_key_path):
             params["use_keys"] = True
             params["key_file"] = creds.ssh_key_path
+
+        # HP Comware (incl. V1910 series) hanya support algoritma SSH legacy
+        # (diffie-hellman-group1-sha1, dll) yang diblokir OpenSSH/Paramiko modern.
+        # Gunakan ssh_config_file untuk mengaktifkan kembali algoritma tsb.
+        if device.vendor == VendorType.HP_COMWARE:
+            legacy_cfg = str(Path(__file__).parent.parent / "data" / "ssh_legacy.cfg")
+            if os.path.exists(legacy_cfg):
+                params["ssh_config_file"] = legacy_cfg
         
         return params
     

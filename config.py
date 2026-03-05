@@ -81,6 +81,11 @@ class Config:
     # Agent Settings
     MAX_REASONING_STEPS: int = 10
     RISK_THRESHOLD: float = 0.7  # Block actions above this risk level
+    
+    # ============= Monitoring Infrastructure =============
+    # Loki log storage (set to docker service name when using docker-compose)
+    loki_url: str = os.getenv("LOKI_URL", "http://loki:3100")
+    loki_ingest_interval: int = int(os.getenv("LOKI_INGEST_INTERVAL", "60"))
 
 
 config = Config()

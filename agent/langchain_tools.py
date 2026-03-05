@@ -387,10 +387,10 @@ def execute_cli(device_ip: str, command: str) -> str:
     Returns:
         Confirmation request or command output
     """
-    from modules.inventory import inventory
-    device = inventory.get_device(device_ip)
+    from tools.vendor_drivers import _resolve_device
+    device = _resolve_device(device_ip)
     device_name = device.name if device else device_ip
-    
+
     action = pending_store.add(
         tool_name="execute_cli",
         params={"device_ip": device_ip, "command": command},
@@ -423,10 +423,10 @@ def execute_cli_config(device_ip: str, commands: str) -> str:
     Returns:
         Confirmation request or execution result
     """
-    from modules.inventory import inventory
-    device = inventory.get_device(device_ip)
+    from tools.vendor_drivers import _resolve_device
+    device = _resolve_device(device_ip)
     device_name = device.name if device else device_ip
-    
+
     cmd_list = [c.strip() for c in commands.split(";") if c.strip()]
     cmd_display = "\n".join([f"    {i+1}. {c}" for i, c in enumerate(cmd_list)])
     
@@ -525,15 +525,14 @@ def confirm_action(action_id: str) -> str:
             return str(result)
         
         elif action.tool_name == "execute_cli_config":
-            from tools.vendor_drivers import connection_manager
-            from modules.inventory import inventory
+            from tools.vendor_drivers import connection_manager, _resolve_device
             device_ip = action.params["device_ip"]
             commands_str = action.params["commands"]
             cmd_list = [c.strip() for c in commands_str.split(";") if c.strip()]
-            
-            device = inventory.get_device(device_ip)
+
+            device = _resolve_device(device_ip)
             if not device:
-                return f"❌ Device {device_ip} tidak ditemukan di inventory"
+                return f"❌ Device {device_ip} tidak ditemukan di inventory maupun infrastructure"
             
             conn = None
             try:
@@ -697,6 +696,13 @@ def get_all_tools() -> list:
     try:
         from agent.langchain_intelligence_tools import get_intelligence_tools
         tools.extend(get_intelligence_tools())
+    except ImportError:
+        pass
+    
+    # Add Loki log query tools
+    try:
+        from agent.langchain_loki_tools import get_loki_tools
+        tools.extend(get_loki_tools())
     except ImportError:
         pass
     

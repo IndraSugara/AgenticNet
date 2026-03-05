@@ -14,3 +14,133 @@
 2026-02-24 09:31:09 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
 2026-02-24 09:32:03 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
 2026-02-24 09:32:43 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 10:21:38 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 10:23:44 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 10:24:53 | ERROR | agenticNet.langgraph_agent | Agent error processing message: model 'gpt-oss:20b' not found (status code: 404)
+Traceback (most recent call last):
+  File "C:\Users\ASUS\agenticNet\agent\langgraph_agent.py", line 255, in agent_node
+    response = llm_with_tools.invoke(messages)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\runnables\base.py", line 5691, in invoke
+    return self.bound.invoke(
+           ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\language_models\chat_models.py", line 402, in invoke
+    self.generate_prompt(
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\language_models\chat_models.py", line 1121, in generate_prompt
+    return self.generate(prompt_messages, stop=stop, callbacks=callbacks, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\language_models\chat_models.py", line 931, in generate
+    self._generate_with_cache(
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\language_models\chat_models.py", line 1233, in _generate_with_cache
+    result = self._generate(
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_ollama\chat_models.py", line 1030, in _generate
+    final_chunk = self._chat_stream_with_aggregation(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_ollama\chat_models.py", line 965, in _chat_stream_with_aggregation
+    for chunk in self._iterate_over_stream(messages, stop, **kwargs):
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_ollama\chat_models.py", line 1054, in _iterate_over_stream
+    for stream_resp in self._create_chat_stream(messages, stop, **kwargs):
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_ollama\chat_models.py", line 952, in _create_chat_stream
+    yield from self._client.chat(**chat_params)
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\ollama\_client.py", line 179, in inner
+    raise ResponseError(e.response.text, e.response.status_code) from None
+ollama._types.ResponseError: model 'gpt-oss:20b' not found (status code: 404)
+2026-02-24 10:24:57 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 10:33:24 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 10:33:29 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 10:33:44 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 10:33:59 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 10:34:23 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 10:36:03 | ERROR | agenticNet.langgraph_agent | Agent error processing message: model 'gpt-oss:20b' not found (status code: 404)
+Traceback (most recent call last):
+  File "C:\Users\ASUS\agenticNet\agent\langgraph_agent.py", line 255, in agent_node
+    response = llm_with_tools.invoke(messages)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\runnables\base.py", line 5691, in invoke
+    return self.bound.invoke(
+           ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\language_models\chat_models.py", line 402, in invoke
+    self.generate_prompt(
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\language_models\chat_models.py", line 1121, in generate_prompt
+    return self.generate(prompt_messages, stop=stop, callbacks=callbacks, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\language_models\chat_models.py", line 931, in generate
+    self._generate_with_cache(
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\language_models\chat_models.py", line 1233, in _generate_with_cache
+    result = self._generate(
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_ollama\chat_models.py", line 1030, in _generate
+    final_chunk = self._chat_stream_with_aggregation(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_ollama\chat_models.py", line 965, in _chat_stream_with_aggregation
+    for chunk in self._iterate_over_stream(messages, stop, **kwargs):
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_ollama\chat_models.py", line 1054, in _iterate_over_stream
+    for stream_resp in self._create_chat_stream(messages, stop, **kwargs):
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_ollama\chat_models.py", line 952, in _create_chat_stream
+    yield from self._client.chat(**chat_params)
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\ollama\_client.py", line 179, in inner
+    raise ResponseError(e.response.text, e.response.status_code) from None
+ollama._types.ResponseError: model 'gpt-oss:20b' not found (status code: 404)
+2026-02-24 10:36:30 | ERROR | agenticNet.langgraph_agent | Agent error processing message: model 'gpt-oss:20b' not found (status code: 404)
+Traceback (most recent call last):
+  File "C:\Users\ASUS\agenticNet\agent\langgraph_agent.py", line 255, in agent_node
+    response = llm_with_tools.invoke(messages)
+               ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\runnables\base.py", line 5691, in invoke
+    return self.bound.invoke(
+           ^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\language_models\chat_models.py", line 402, in invoke
+    self.generate_prompt(
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\language_models\chat_models.py", line 1121, in generate_prompt
+    return self.generate(prompt_messages, stop=stop, callbacks=callbacks, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\language_models\chat_models.py", line 931, in generate
+    self._generate_with_cache(
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_core\language_models\chat_models.py", line 1233, in _generate_with_cache
+    result = self._generate(
+             ^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_ollama\chat_models.py", line 1030, in _generate
+    final_chunk = self._chat_stream_with_aggregation(
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_ollama\chat_models.py", line 965, in _chat_stream_with_aggregation
+    for chunk in self._iterate_over_stream(messages, stop, **kwargs):
+                 ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_ollama\chat_models.py", line 1054, in _iterate_over_stream
+    for stream_resp in self._create_chat_stream(messages, stop, **kwargs):
+                       ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\langchain_ollama\chat_models.py", line 952, in _create_chat_stream
+    yield from self._client.chat(**chat_params)
+  File "C:\Users\ASUS\AppData\Local\Programs\Python\Python312\Lib\site-packages\ollama\_client.py", line 179, in inner
+    raise ResponseError(e.response.text, e.response.status_code) from None
+ollama._types.ResponseError: model 'gpt-oss:20b' not found (status code: 404)
+2026-02-24 10:36:57 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 10:44:18 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 10:44:23 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 10:56:46 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 10:57:30 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 11:20:07 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 11:20:35 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 11:20:59 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 11:54:48 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 11:55:21 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 11:57:28 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 11:58:31 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 11:58:34 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 11:58:38 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 11:58:42 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 11:59:15 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 12:11:59 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 12:16:48 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-24 12:51:30 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-25 01:58:02 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (80 tools bound)
+2026-02-25 02:12:59 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (82 tools bound)
+2026-02-25 02:16:37 | INFO | agenticNet.log_watcher | 🔍 Log watcher started — watching 2 device configs
+2026-02-25 03:00:58 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (82 tools bound)
+2026-03-03 14:12:55 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (82 tools bound)
+2026-03-05 02:55:42 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (82 tools bound)
+2026-03-05 10:53:19 | INFO | agenticNet.langgraph_agent | ✅ Model supports tool calling (82 tools bound)

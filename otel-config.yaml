@@ -1,0 +1,67 @@
+receivers:
+  # Receive Syslog from network devices (RFC5424 format, UDP 514)
+  syslog:
+    udp:
+      listen_address: "0.0.0.0:514"
+    protocol: rfc5424
+    operators:
+      - type: move
+        from: attributes.hostname
+        to: resource["host.name"]
+      - type: move
+        from: attributes.appname
+        to: resource["service.name"]
+
+  # Also accept OTLP logs (for future programmatic ingestion)
+  otlp:
+    protocols:
+      grpc:
+        endpoint: "0.0.0.0:4317"
+      http:
+        endpoint: "0.0.0.0:4318"
+
+processors:
+  # Promote resource attributes as Loki stream labels
+  # loki.resource.labels tells the Loki exporter which resource attrs to use as labels
+  resource:
+    attributes:
+      - key: job
+        value: syslog
+        action: upsert
+      - key: loki.resource.labels
+        value: "job, host.name, service.name"
+        action: upsert
+
+  # Batch logs for efficient export
+  batch:
+    timeout: 5s
+    send_batch_size: 512
+
+  # Memory limiter to prevent OOM
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 256
+    spike_limit_mib: 64
+
+exporters:
+  # Forward logs to Loki
+  loki:
+    endpoint: http://loki:3100/loki/api/v1/push
+    default_labels_enabled:
+      exporter: false
+      job: true
+      instance: false
+      level: true
+
+  # Debug — log to console (can disable in production)
+  debug:
+    verbosity: basic
+
+service:
+  pipelines:
+    # Log pipeline only — no metrics
+    logs:
+      receivers: [syslog, otlp]
+      processors: [memory_limiter, resource, batch]
+      exporters: [loki, debug]
+

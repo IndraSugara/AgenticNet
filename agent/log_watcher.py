@@ -1,15 +1,16 @@
 """
 Log Watcher Service with Autonomous Remediation
 
-Background service that periodically reads logs from network devices,
-detects anomalies (errors, interface flaps, auth failures, etc.),
-creates alerts, and triggers the agent to investigate AND remediate.
+Anomaly detection and AI-driven remediation for network device logs.
+
+Log collection is handled by the Syslog → OTel → Loki pipeline.
+This service receives log lines via `process_log_line()` (called by
+LokiIngester) and runs anomaly detection + agent investigation.
 
 Inspired by OpenClaw's autonomous workflow execution pattern.
 """
 import asyncio
 import re
-import time
 from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -216,38 +217,32 @@ class DeviceWatchConfig:
     """Per-device log watch configuration"""
     device_ip: str
     enabled: bool = True
-    interval_seconds: int = 60
     auto_trigger_agent: bool = True
     auto_remediate: bool = True  # Enable autonomous remediation
-    last_check: float = 0.0
-    last_log_hash: str = ""
-    last_log_lines: List[str] = field(default_factory=list)
 
 
 # ============= LOG WATCHER SERVICE =============
 
 class LogWatcher:
     """
-    Background service for automated device log monitoring.
-    
-    Features:
-    - Periodic log polling via SSH (unified_commands.get_logs)
-    - Diff tracking — only processes new log lines
-    - Anomaly detection with regex patterns
+    Anomaly detection and AI-driven remediation for network device logs.
+
+    Log lines are delivered by LokiIngester (via process_log_line) from
+    the Syslog → OTel → Loki pipeline. This class handles:
+    - Regex-based anomaly detection
     - Alert creation via alert_manager
-    - Optional agent auto-trigger for investigation
+    - ChromaDB embedding for RAG
+    - Agent auto-trigger for investigation + remediation
     """
     
     def __init__(self):
         self._running = False
-        self._task: Optional[asyncio.Task] = None
         self._devices: Dict[str, DeviceWatchConfig] = {}
         self._patterns: List[AnomalyPattern] = list(DEFAULT_PATTERNS)
         self._anomalies: List[DetectedAnomaly] = []
         self._investigations: List[dict] = []  # auto-triggered agent investigations
         self._remediation_history: List[dict] = []  # remediation action history
         self._anomaly_counter = 0
-        self._default_interval = 60
         self._auto_trigger = True
         self._agent_callback: Optional[Callable] = None
     
@@ -263,18 +258,18 @@ class LogWatcher:
         self._agent_callback = callback
     
     def add_device(self, device_ip: str, interval: int = None, auto_trigger: bool = None):
-        """Add or update a device for log watching"""
+        """Register a device for anomaly detection.
+        
+        Logs for this device are delivered via Syslog → OTel → Loki → LokiIngester.
+        """
         if device_ip in self._devices:
             config = self._devices[device_ip]
-            if interval is not None:
-                config.interval_seconds = interval
             if auto_trigger is not None:
                 config.auto_trigger_agent = auto_trigger
             config.enabled = True
         else:
             self._devices[device_ip] = DeviceWatchConfig(
                 device_ip=device_ip,
-                interval_seconds=interval or self._default_interval,
                 auto_trigger_agent=auto_trigger if auto_trigger is not None else self._auto_trigger
             )
     
@@ -294,14 +289,13 @@ class LogWatcher:
     async def start(self, device_ips: List[str] = None):
         """Start the log watcher.
         
-        Args:
-            device_ips: Optional list of device IPs to watch. 
-                        If None, watches all inventory devices.
+        Marks the watcher as active. Log lines are pushed in by
+        LokiIngester.process_log_line() — no SSH polling loop.
         """
         if self._running:
             return
         
-        # Auto-discover devices from inventory if none specified
+        # Auto-register devices from inventory
         if not self._devices or device_ips:
             try:
                 from modules.inventory import inventory
@@ -314,79 +308,49 @@ class LogWatcher:
                 logger.warning(f"Could not auto-discover devices: {e}")
         
         self._running = True
-        self._task = asyncio.create_task(self._watch_loop())
-        logger.info(f"🔍 Log watcher started — monitoring {len(self._devices)} devices")
+        logger.info(f"🔍 Log watcher started — watching {len(self._devices)} device configs")
     
     async def stop(self):
         """Stop the log watcher"""
         self._running = False
-        if self._task:
-            self._task.cancel()
-            try:
-                await self._task
-            except asyncio.CancelledError:
-                pass
         logger.info("⏹️ Log watcher stopped")
     
-    async def _watch_loop(self):
-        """Main log watching loop"""
-        while self._running:
-            now = time.time()
-            
-            for ip, config in list(self._devices.items()):
-                if not config.enabled:
-                    continue
-                
-                if now - config.last_check >= config.interval_seconds:
-                    asyncio.create_task(self._check_device_logs(ip, config))
-                    config.last_check = now
-            
-            await asyncio.sleep(5)
-    
-    async def _check_device_logs(self, device_ip: str, config: DeviceWatchConfig):
-        """Fetch and analyze logs from a single device"""
-        try:
-            from tools.unified_commands import unified_commands
-            
-            result = await unified_commands.get_logs(device_ip)
-            
-            if not result.success:
-                logger.debug(f"Failed to get logs from {device_ip}: {result.error}")
-                return
-            
-            # Get log lines
-            log_lines = result.data.get("logs", [])
-            if not log_lines:
-                return
-            
-            # Diff: only process new lines
-            new_lines = self._get_new_lines(config, log_lines)
-            if not new_lines:
-                return
-            
-            # Update stored log lines
-            config.last_log_lines = log_lines
-            
-            # Check each new line for anomalies
-            device_name = result.device_name or device_ip
-            for line in new_lines:
-                await self._check_line_for_anomalies(device_ip, device_name, line, config)
-                
-        except Exception as e:
-            logger.error(f"Error checking logs for {device_ip}: {e}")
-    
-    def _get_new_lines(self, config: DeviceWatchConfig, current_lines: List[str]) -> List[str]:
-        """Get lines that are new since last check"""
-        if not config.last_log_lines:
-            # First run — store all but don't process to avoid false positives
-            config.last_log_lines = current_lines
-            return []
+    async def process_log_line(self, host: str, line: str):
+        """Process a single log line delivered from Loki.
         
-        # Find new lines by comparing with previous
-        old_set = set(config.last_log_lines)
-        new_lines = [line for line in current_lines if line.strip() and line not in old_set]
+        Called by LokiIngester for every new log line it fetches from Loki.
+        Checks the line against all anomaly patterns and triggers investigation
+        for matching anomalies.
         
-        return new_lines
+        Args:
+            host: Hostname or IP of the device that generated this log
+            line: Raw log line text
+        """
+        if not self._running:
+            return
+        
+        # Look up device config by host (try as IP first, then by name match)
+        config = (
+            self._devices.get(host)
+            or next(
+                (c for ip, c in self._devices.items() if ip == host or c.device_ip == host),
+                None
+            )
+        )
+        
+        if config is None:
+            # Unknown device — create a minimal config for anomaly detection
+            config = DeviceWatchConfig(device_ip=host)
+        
+        if not config.enabled:
+            return
+        
+        await self._check_line_for_anomalies(
+            device_ip=host,
+            device_name=host,
+            line=line,
+            config=config,
+        )
     
     async def _check_line_for_anomalies(
         self, device_ip: str, device_name: str, 
