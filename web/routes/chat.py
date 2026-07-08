@@ -8,11 +8,14 @@ from pydantic import BaseModel
 from typing import Optional
 import asyncio
 import json
+import logging
 
 from config import config
 from agent.langgraph_agent import network_agent as langgraph_agent
 from web.websocket_manager import ws_manager
 from modules.monitoring import monitoring
+
+logger = logging.getLogger("chat_routes")
 
 router = APIRouter()
 
@@ -145,7 +148,7 @@ async def stream_agent(websocket: WebSocket):
     except Exception as e:
         try:
             await websocket.send_json({"type": "error", "message": str(e)})
-        except:
+        except Exception:
             pass
 
 
@@ -181,12 +184,12 @@ async def websocket_metrics(websocket: WebSocket):
             except asyncio.TimeoutError:
                 try:
                     await websocket.send_json({"type": "ping"})
-                except:
+                except Exception:
                     break
     except WebSocketDisconnect:
         pass
     except Exception as e:
-        print(f"WebSocket error: {e}")
+        logger.warning(f"WebSocket metrics error: {e}")
     finally:
         ws_manager.disconnect(websocket, "metrics")
 
@@ -212,7 +215,7 @@ async def clear_conversation(thread_id: str):
     try:
         langgraph_agent.clear_history(thread_id)
     except Exception as e:
-        print(f"Error clearing LangGraph history: {e}")
+        logger.warning(f"Error clearing LangGraph history: {e}")
     
     # Also clear from SQLite if present
     try:

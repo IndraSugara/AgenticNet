@@ -4,6 +4,7 @@ LangChain Tools for Network Diagnostics
 Converts network_tools to LangChain tool format for use with LangGraph agents.
 """
 import asyncio
+import concurrent.futures
 from typing import List, Optional
 from langchain_core.tools import tool
 from tools.network_tools import network_tools
@@ -387,8 +388,8 @@ def execute_cli(device_ip: str, command: str) -> str:
     Returns:
         Confirmation request or command output
     """
-    from tools.vendor_drivers import _resolve_device
-    device = _resolve_device(device_ip)
+    from modules.inventory import inventory
+    device = inventory.get_device(device_ip)
     device_name = device.name if device else device_ip
 
     action = pending_store.add(
@@ -423,8 +424,8 @@ def execute_cli_config(device_ip: str, commands: str) -> str:
     Returns:
         Confirmation request or execution result
     """
-    from tools.vendor_drivers import _resolve_device
-    device = _resolve_device(device_ip)
+    from modules.inventory import inventory
+    device = inventory.get_device(device_ip)
     device_name = device.name if device else device_ip
 
     cmd_list = [c.strip() for c in commands.split(";") if c.strip()]
@@ -446,6 +447,22 @@ def execute_cli_config(device_ip: str, commands: str) -> str:
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"Untuk melanjutkan, gunakan confirm_action dengan action_id '{action.action_id}'"
     )
+
+
+def _run_async(coro):
+    """Run an async coroutine from a sync context, safely handling nested event loops."""
+    try:
+        loop = asyncio.get_running_loop()
+    except RuntimeError:
+        loop = None
+    
+    if loop and loop.is_running():
+        # We're inside a running event loop — run in a separate thread with its own loop
+        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+            future = pool.submit(asyncio.run, coro)
+            return future.result(timeout=120)
+    else:
+        return asyncio.run(coro)
 
 
 @tool
@@ -489,14 +506,7 @@ def confirm_action(action_id: str) -> str:
             else:
                 coro = unified_commands.no_shutdown_interface(**action.params)
             
-            # Run async function
-            try:
-                loop = asyncio.get_running_loop()
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    result = loop.run_in_executor(pool, lambda: asyncio.run(coro))
-            except RuntimeError:
-                result = asyncio.run(coro)
+            result = _run_async(coro)
             
             if hasattr(result, 'success'):
                 if result.success:
@@ -510,13 +520,7 @@ def confirm_action(action_id: str) -> str:
                 action.params["device_ip"], 
                 action.params["command"]
             )
-            try:
-                loop = asyncio.get_running_loop()
-                import concurrent.futures
-                with concurrent.futures.ThreadPoolExecutor() as pool:
-                    result = loop.run_in_executor(pool, lambda: asyncio.run(coro))
-            except RuntimeError:
-                result = asyncio.run(coro)
+            result = _run_async(coro)
             
             if hasattr(result, 'success'):
                 if result.success:
@@ -525,20 +529,15 @@ def confirm_action(action_id: str) -> str:
             return str(result)
         
         elif action.tool_name == "execute_cli_config":
-            from tools.vendor_drivers import connection_manager, _resolve_device
+            from tools.vendor_drivers import connection_manager
+            from modules.inventory import inventory
             device_ip = action.params["device_ip"]
             commands_str = action.params["commands"]
             cmd_list = [c.strip() for c in commands_str.split(";") if c.strip()]
 
-            device = _resolve_device(device_ip)
+            device = inventory.get_device(device_ip)
             if not device:
-                return f"❌ Device {device_ip} tidak ditemukan di inventory maupun infrastructure"
-            
-            conn = None
-            try:
-                loop = asyncio.get_running_loop()
-            except RuntimeError:
-                loop = None
+                return f"❌ Device {device_ip} tidak ditemukan di inventory"
             
             async def _exec_config():
                 c = await connection_manager.get_connection(device)
@@ -546,15 +545,7 @@ def confirm_action(action_id: str) -> str:
                     return None
                 return await asyncio.to_thread(c.execute_config, cmd_list)
             
-            try:
-                if loop and loop.is_running():
-                    import concurrent.futures
-                    with concurrent.futures.ThreadPoolExecutor() as pool:
-                        result = loop.run_in_executor(pool, lambda: asyncio.run(_exec_config()))
-                else:
-                    result = asyncio.run(_exec_config())
-            except RuntimeError:
-                result = asyncio.run(_exec_config())
+            result = _run_async(_exec_config())
             
             if result is None:
                 return f"❌ Gagal konek ke device {device_ip}"

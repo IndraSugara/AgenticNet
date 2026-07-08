@@ -11,11 +11,21 @@ Optimized with:
 from fastapi import FastAPI, Request
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
 from contextlib import asynccontextmanager
 import asyncio
+import logging
 import os
+
+try:
+    from slowapi import Limiter, _rate_limit_exceeded_handler
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    SLOWAPI_AVAILABLE = True
+except ImportError:
+    SLOWAPI_AVAILABLE = False
 
 from config import config
 from modules.monitoring import monitoring
@@ -89,14 +99,71 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-# Add CORS middleware
+# Configure CORS — use env var for origins, fallback to wildcard in dev mode
+_cors_origins = (
+    [o.strip() for o in config.CORS_ORIGINS.split(",") if o.strip()]
+    if config.CORS_ORIGINS
+    else ["*"]
+)
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=_cors_origins != ["*"],  # Only allow credentials when origins are explicit
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+# Optional API key authentication middleware
+class APIKeyMiddleware(BaseHTTPMiddleware):
+    """Simple API key authentication via X-API-Key header.
+    
+    When API_KEY is not set in config, authentication is disabled (dev mode).
+    Health and static endpoints are always exempt.
+    """
+    
+    EXEMPT_PATHS = {"/health", "/docs", "/openapi.json", "/redoc", "/"}
+    EXEMPT_PREFIXES = ("/static/",)
+    
+    async def dispatch(self, request: Request, call_next):
+        # Skip auth if API_KEY is not configured (dev mode)
+        if not config.API_KEY:
+            return await call_next(request)
+        
+        # Skip auth for exempt paths
+        path = request.url.path
+        if path in self.EXEMPT_PATHS or path.startswith(self.EXEMPT_PREFIXES):
+            return await call_next(request)
+        
+        # Skip auth for WebSocket upgrades (they handle auth differently)
+        if request.headers.get("upgrade", "").lower() == "websocket":
+            return await call_next(request)
+        
+        # Check API key
+        api_key = request.headers.get("X-API-Key", "")
+        if api_key != config.API_KEY:
+            return JSONResponse(
+                status_code=401,
+                content={"detail": "Invalid or missing API key. Set X-API-Key header."}
+            )
+        
+        return await call_next(request)
+
+
+app.add_middleware(APIKeyMiddleware)
+
+# Rate limiting via SlowAPI
+logger = logging.getLogger("web.main")
+if SLOWAPI_AVAILABLE and config.RATE_LIMIT:
+    limiter = Limiter(
+        key_func=get_remote_address,
+        default_limits=[config.RATE_LIMIT],
+    )
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    logger.info(f"Rate limiting enabled: {config.RATE_LIMIT}")
+elif not SLOWAPI_AVAILABLE:
+    logger.warning("slowapi not installed — rate limiting disabled. Install with: pip install slowapi")
 
 # Setup templates and static files
 templates_dir = os.path.join(os.path.dirname(__file__), "templates")

@@ -50,7 +50,10 @@ async def update_health_cache():
 async def _check_ollama_connection() -> bool:
     """Check if Ollama is running by pinging /api/tags"""
     try:
-        async with httpx.AsyncClient(timeout=5.0) as client:
+        headers = {}
+        if "ngrok" in config.OLLAMA_HOST:
+            headers["ngrok-skip-browser-warning"] = "true"
+        async with httpx.AsyncClient(timeout=5.0, headers=headers) as client:
             resp = await client.get(f"{config.OLLAMA_HOST}/api/tags")
             return resp.status_code == 200
     except Exception:

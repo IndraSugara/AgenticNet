@@ -16,7 +16,7 @@ class Config:
     
     # Ollama Settings
     OLLAMA_HOST: str = os.getenv("OLLAMA_HOST", "http://localhost:11434")
-    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "DEFAULT_MODEL")
+    OLLAMA_MODEL: str = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
     
     # OpenAI Settings
     OPENAI_API_KEY: str = os.getenv("OPENAI_API_KEY", "")
@@ -46,17 +46,17 @@ class Config:
             "provider": "ollama",
             "description": "Faster responses, lower resource usage"
         },
-        "kimi-k2-thinking:cloud": {
+        "kimi-k2-thinking": {
             "name": "Kimi K2 Thinking",
-            "model_id": "kimi-k2-thinking:cloud",
+            "model_id": "kimi-k2-thinking",
             "provider": "ollama",
             "description": "Cloud-based thinking model with advanced reasoning"
         },
         "kimi-k2.5:cloud": {
             "name": "Kimi K2.5",
             "model_id": "kimi-k2.5:cloud",
-            "provider": "ollama",
-            "description": "Cloud-based thinking model with advanced reasoning"
+            "provider": "openai",
+            "description": "Cloud-based thinking model with advanced reasoning (OpenAI-compatible)"
         },
         "gpt-4o-mini": {
             "name": "GPT-4o Mini",
@@ -86,6 +86,14 @@ class Config:
     # Loki log storage (set to docker service name when using docker-compose)
     loki_url: str = os.getenv("LOKI_URL", "http://loki:3100")
     loki_ingest_interval: int = int(os.getenv("LOKI_INGEST_INTERVAL", "60"))
+    
+    # ============= Security =============
+    # API key for endpoint authentication (empty = disabled / dev mode)
+    API_KEY: str = os.getenv("API_KEY", "")
+    # Comma-separated allowed CORS origins (empty = allow all in dev mode)
+    CORS_ORIGINS: str = os.getenv("CORS_ORIGINS", "")
+    # Rate limiting: requests per minute for API endpoints (empty = disabled)
+    RATE_LIMIT: str = os.getenv("RATE_LIMIT", "60/minute")
 
 
 config = Config()

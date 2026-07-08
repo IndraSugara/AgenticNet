@@ -114,41 +114,6 @@ def add_device(name: str, ip: str, device_type: str, location: str = "", descrip
             description=description
         )
 
-        # ── Sync to InventoryModule (modules/inventory.py) so that SSH/CLI tools
-        #    can find the device without a separate registration step.
-        try:
-            from modules.inventory import (
-                inventory as inv_module,
-                DeviceInfo,
-                DeviceRole,
-            )
-
-            _type_to_role = {
-                "router": DeviceRole.ROUTER,
-                "switch": DeviceRole.SWITCH,
-                "server": DeviceRole.SERVER,
-                "firewall": DeviceRole.FIREWALL,
-                "access_point": DeviceRole.ACCESS_POINT,
-            }
-            role = _type_to_role.get(device_type.lower(), DeviceRole.OTHER)
-            vendor = inv_module.detect_vendor(name)
-
-            dev_info = DeviceInfo(
-                id=device.id,
-                name=name,
-                ip_address=ip,
-                vendor=vendor,
-                role=role,
-                location=location,
-                description=description,
-                ssh_port=device.ssh_port,
-            )
-            inv_module.add_device(dev_info)          # inserts into inventory.db
-        except Exception as sync_err:
-            # Non-fatal: device was added to infrastructure; SSH may still work
-            # via the _resolve_device fallback in vendor_drivers.
-            print(f"⚠️ Inventory sync warning: {sync_err}")
-
         return f"✅ Device berhasil ditambahkan!\n\nID: {device.id}\nName: {device.name}\nIP: {device.ip}\nType: {device.type.value}"
 
     except Exception as e:

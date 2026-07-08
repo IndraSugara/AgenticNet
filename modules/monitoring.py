@@ -13,18 +13,21 @@ from typing import List, Dict, Any, Optional
 from datetime import datetime, timedelta
 from enum import Enum
 import asyncio
+import logging
 import threading
 import time
 import os
 import sqlite3
 from pathlib import Path
 
+logger = logging.getLogger("monitoring")
+
 try:
     import psutil
     PSUTIL_AVAILABLE = True
 except ImportError:
     PSUTIL_AVAILABLE = False
-    print("⚠️ psutil not installed. System metrics collection disabled.")
+    logger.warning("psutil not installed. System metrics collection disabled.")
 
 
 class AlertSeverity(Enum):
@@ -193,8 +196,35 @@ class MonitoringModule:
         self._collection_interval = 10  # seconds
         self._db_path = "data/metrics.db"
         self._prev_disk_io: Optional[Any] = None
-        self._init_database()
+        self._conn: Optional[sqlite3.Connection] = None
+        self._db_lock = threading.Lock()
+        self._safe_init_database()
         
+    def _safe_init_database(self):
+        """Initialize database, auto-recreate if corrupted"""
+        try:
+            self._init_database()
+        except Exception as e:
+            logger.warning(f"metrics.db error ({e}), recreating...")
+            try:
+                # Close existing connection if any
+                if self._conn:
+                    try:
+                        self._conn.close()
+                    except Exception:
+                        pass
+                    self._conn = None
+                # Remove corrupt file
+                db_file = Path(self._db_path)
+                if db_file.exists():
+                    db_file.unlink()
+                    logger.info("Removed corrupt metrics.db")
+                # Retry init
+                self._init_database()
+                logger.info("metrics.db recreated successfully")
+            except Exception as e2:
+                logger.error(f"Failed to recreate metrics.db: {e2}")
+
     def update_network_metrics(self, latency=None, bandwidth=None):
         """Update cached network metrics"""
         if latency is not None:
@@ -207,73 +237,81 @@ class MonitoringModule:
         return self._current_network_metrics
     
     def _get_connection(self) -> sqlite3.Connection:
-        """Get SQLite connection with threading support"""
+        """Get or create a shared SQLite connection with WAL mode"""
         os.makedirs("data", exist_ok=True)
-        return sqlite3.connect(self._db_path, check_same_thread=False)
+        if self._conn is None:
+            self._conn = sqlite3.connect(
+                self._db_path,
+                check_same_thread=False,
+                timeout=10
+            )
+            self._conn.execute("PRAGMA journal_mode=WAL")
+            self._conn.execute("PRAGMA synchronous=NORMAL")
+            self._conn.execute("PRAGMA busy_timeout=5000")
+        return self._conn
     
     def _init_database(self):
         """Initialize SQLite database for metrics storage"""
-        conn = self._get_connection()
-        cursor = conn.cursor()
-        
-        # Create tables for time-series metrics
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS metrics_raw (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                metric_name TEXT NOT NULL,
-                value REAL NOT NULL,
-                unit TEXT,
-                labels TEXT,  -- JSON
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_metric_time 
-            ON metrics_raw(metric_name, timestamp)
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS metrics_5min (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                metric_name TEXT NOT NULL,
-                avg_value REAL NOT NULL,
-                min_value REAL NOT NULL,
-                max_value REAL NOT NULL,
-                unit TEXT,
-                labels TEXT,
-                timestamp DATETIME NOT NULL
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_metric_time_5min 
-            ON metrics_5min(metric_name, timestamp)
-        """)
-        
-        cursor.execute("""
-            CREATE TABLE IF NOT EXISTS interface_metrics (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                interface_name TEXT NOT NULL,
-                bytes_sent INTEGER,
-                bytes_recv INTEGER,
-                packets_sent INTEGER,
-                packets_recv INTEGER,
-                errors_in INTEGER,
-                errors_out INTEGER,
-                drops_in INTEGER,
-                drops_out INTEGER,
-                timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
-        """)
-        
-        cursor.execute("""
-            CREATE INDEX IF NOT EXISTS idx_interface_time 
-            ON interface_metrics(interface_name, timestamp)
-        """)
-        
-        conn.commit()
-        conn.close()
+        with self._db_lock:
+            conn = self._get_connection()
+            cursor = conn.cursor()
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS metrics_raw (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    metric_name TEXT NOT NULL,
+                    value REAL NOT NULL,
+                    unit TEXT,
+                    labels TEXT,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_metric_time
+                ON metrics_raw(metric_name, timestamp)
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS metrics_5min (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    metric_name TEXT NOT NULL,
+                    avg_value REAL NOT NULL,
+                    min_value REAL NOT NULL,
+                    max_value REAL NOT NULL,
+                    unit TEXT,
+                    labels TEXT,
+                    timestamp DATETIME NOT NULL
+                )
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_metric_time_5min
+                ON metrics_5min(metric_name, timestamp)
+            """)
+
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS interface_metrics (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    interface_name TEXT NOT NULL,
+                    bytes_sent INTEGER,
+                    bytes_recv INTEGER,
+                    packets_sent INTEGER,
+                    packets_recv INTEGER,
+                    errors_in INTEGER,
+                    errors_out INTEGER,
+                    drops_in INTEGER,
+                    drops_out INTEGER,
+                    timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_interface_time
+                ON interface_metrics(interface_name, timestamp)
+            """)
+
+            conn.commit()
     
     def collect_system_metrics(self) -> Optional[SystemMetrics]:
         """
@@ -305,7 +343,7 @@ class MonitoringModule:
                     memory_cached_gb = memory.cached / (1024 ** 3)
                 elif hasattr(memory, 'buffers'):
                     memory_cached_gb = memory.buffers / (1024 ** 3)
-            except:
+            except Exception:
                 pass
             
             # Disk - usage and I/O
@@ -327,7 +365,7 @@ class MonitoringModule:
                         disk_read_mb = read_diff / (1024 * 1024)
                         disk_write_mb = write_diff / (1024 * 1024)
                     self._prev_disk_io = disk_io
-            except:
+            except Exception:
                 pass
             
             # Network - total counters
@@ -343,7 +381,7 @@ class MonitoringModule:
             try:
                 if hasattr(os, 'getloadavg'):
                     load_average = list(os.getloadavg())
-            except:
+            except Exception:
                 pass
             
             # Temperature sensors (if available)
@@ -355,7 +393,7 @@ class MonitoringModule:
                         if entries:
                             avg_temp = sum(e.current for e in entries) / len(entries)
                             temperatures[name] = round(avg_temp, 1)
-            except:
+            except Exception:
                 pass
             
             # Per-interface metrics
@@ -390,7 +428,7 @@ class MonitoringModule:
                         # Store interface metrics to database
                         self._store_interface_metrics(iface_metrics)
             except Exception as e:
-                print(f"Warning: Could not collect interface metrics: {e}")
+                logger.warning(f"Could not collect interface metrics: {e}")
             
             # Uptime
             boot_time = datetime.fromtimestamp(psutil.boot_time())
@@ -432,7 +470,7 @@ class MonitoringModule:
             return metrics
             
         except Exception as e:
-            print(f"❌ Error collecting system metrics: {e}")
+            logger.error(f"Error collecting system metrics: {e}")
             return None
     
     def _ingest_system_metrics(self, metrics: SystemMetrics):
@@ -474,14 +512,14 @@ class MonitoringModule:
         
         self._collection_thread = threading.Thread(target=collection_loop, daemon=True)
         self._collection_thread.start()
-        print(f"📊 Started metrics collection (every {interval}s)")
+        logger.info(f"Started metrics collection (every {interval}s)")
     
     def stop_collection(self):
         """Stop background metrics collection"""
         self._collection_running = False
         if self._collection_thread:
             self._collection_thread.join(timeout=2)
-        print("📊 Stopped metrics collection")
+        logger.info("Stopped metrics collection")
     
     def ingest_metric(self, metric: MetricPoint) -> Optional[Alert]:
         """
@@ -658,93 +696,83 @@ class MonitoringModule:
         return output
     
     def _store_metrics_to_db(self, metrics: SystemMetrics):
-        """Store system metrics to database"""
+        """Store system metrics to database using shared connection"""
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            now = datetime.now().isoformat()
-            
-            # Store key metrics
-            cursor.execute("INSERT INTO metrics_raw (metric_name, value, unit, timestamp) VALUES (?, ?, ?, ?)",
-                         ("cpu_usage", metrics.cpu_percent, "%", now))
-            cursor.execute("INSERT INTO metrics_raw (metric_name, value, unit, timestamp) VALUES (?, ?, ?, ?)",
-                         ("memory_usage", metrics.memory_percent, "%", now))
-            cursor.execute("INSERT INTO metrics_raw (metric_name, value, unit, timestamp) VALUES (?, ?, ?, ?)",
-                         ("disk_usage", metrics.disk_percent, "%", now))
-            cursor.execute("INSERT INTO metrics_raw (metric_name, value, unit, timestamp) VALUES (?, ?, ?, ?)",
-                         ("disk_read_mb", metrics.disk_read_mb, "MB", now))
-            cursor.execute("INSERT INTO metrics_raw (metric_name, value, unit, timestamp) VALUES (?, ?, ?, ?)",
-                         ("disk_write_mb", metrics.disk_write_mb, "MB", now))
-            
-            # Store per-core CPU
-            for i, core_pct in enumerate(metrics.cpu_per_core):
-                cursor.execute("INSERT INTO metrics_raw (metric_name, value, unit, labels, timestamp) VALUES (?, ?, ?, ?, ?)",
-                             ("cpu_core_usage", core_pct, "%", f'{{"core":{i}}}', now))
-            
-            conn.commit()
-            conn.close()
-            
-            # Cleanup old data (keep only last 24 hours for raw data)
+            with self._db_lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                now = datetime.now().isoformat()
+
+                rows = [
+                    ("cpu_usage",    metrics.cpu_percent,  "%",  None, now),
+                    ("memory_usage", metrics.memory_percent, "%", None, now),
+                    ("disk_usage",   metrics.disk_percent,  "%",  None, now),
+                    ("disk_read_mb", metrics.disk_read_mb,  "MB", None, now),
+                    ("disk_write_mb",metrics.disk_write_mb, "MB", None, now),
+                ]
+                for i, core_pct in enumerate(metrics.cpu_per_core):
+                    rows.append(("cpu_core_usage", core_pct, "%", f'{{"core":{i}}}', now))
+
+                cursor.executemany(
+                    "INSERT INTO metrics_raw (metric_name, value, unit, labels, timestamp) VALUES (?, ?, ?, ?, ?)",
+                    rows
+                )
+                conn.commit()
+
+            # Cleanup old data outside the write lock
             self._cleanup_old_metrics()
         except Exception as e:
-            print(f"Warning: Could not store metrics to database: {e}")
-    
+            logger.warning(f"Could not store metrics to database: {e}")
+
     def _store_interface_metrics(self, iface: InterfaceMetrics):
-        """Store interface metrics to database"""
+        """Store interface metrics to database using shared connection"""
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            cursor.execute("""
-                INSERT INTO interface_metrics 
-                (interface_name, bytes_sent, bytes_recv, packets_sent, packets_recv,
-                 errors_in, errors_out, drops_in, drops_out, timestamp) 
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (iface.name, iface.bytes_sent, iface.bytes_recv, iface.packets_sent,
-                  iface.packets_recv, iface.errin, iface.errout, iface.dropin,
-                  iface.dropout, iface.timestamp.isoformat()))
-            conn.commit()
-            conn.close()
+            with self._db_lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO interface_metrics
+                    (interface_name, bytes_sent, bytes_recv, packets_sent, packets_recv,
+                     errors_in, errors_out, drops_in, drops_out, timestamp)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """, (iface.name, iface.bytes_sent, iface.bytes_recv, iface.packets_sent,
+                      iface.packets_recv, iface.errin, iface.errout, iface.dropin,
+                      iface.dropout, iface.timestamp.isoformat()))
+                conn.commit()
         except Exception as e:
-            print(f"Warning: Could not store interface metrics: {e}")
+            logger.warning(f"Could not store interface metrics: {e}")
     
     def _cleanup_old_metrics(self):
         """Delete metrics older than retention window"""
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            
-            # Delete raw metrics older than 24 hours
-            cutoff = (datetime.now() - timedelta(hours=24)).isoformat()
-            cursor.execute("DELETE FROM metrics_raw WHERE timestamp < ?", (cutoff,))
-            
-            # Delete interface metrics older than 24 hours
-            cursor.execute("DELETE FROM interface_metrics WHERE timestamp < ?", (cutoff,))
-            
-            # Delete aggregated metrics older than 30 days
-            cutoff_30d = (datetime.now() - timedelta(days=30)).isoformat()
-            cursor.execute("DELETE FROM metrics_5min WHERE timestamp < ?", (cutoff_30d,))
-            
-            conn.commit()
-            conn.close()
+            with self._db_lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+
+                cutoff = (datetime.now() - timedelta(hours=24)).isoformat()
+                cursor.execute("DELETE FROM metrics_raw WHERE timestamp < ?", (cutoff,))
+                cursor.execute("DELETE FROM interface_metrics WHERE timestamp < ?", (cutoff,))
+
+                cutoff_30d = (datetime.now() - timedelta(days=30)).isoformat()
+                cursor.execute("DELETE FROM metrics_5min WHERE timestamp < ?", (cutoff_30d,))
+
+                conn.commit()
         except Exception as e:
-            print(f"Warning: Could not cleanup old metrics: {e}")
+            logger.warning(f"Could not cleanup old metrics: {e}")
     
     def get_metric_history(self, metric_name: str, hours: int = 1) -> List[Dict[str, Any]]:
         """Get historical data for a specific metric"""
         try:
-            conn = self._get_connection()
-            cursor = conn.cursor()
-            
-            cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
-            cursor.execute("""
-                SELECT timestamp, value, unit FROM metrics_raw 
-                WHERE metric_name = ? AND timestamp >= ?
-                ORDER BY timestamp ASC
-            """, (metric_name, cutoff))
-            
-            rows = cursor.fetchall()
-            conn.close()
-            
+            with self._db_lock:
+                conn = self._get_connection()
+                cursor = conn.cursor()
+                cutoff = (datetime.now() - timedelta(hours=hours)).isoformat()
+                cursor.execute("""
+                    SELECT timestamp, value, unit FROM metrics_raw
+                    WHERE metric_name = ? AND timestamp >= ?
+                    ORDER BY timestamp ASC
+                """, (metric_name, cutoff))
+                rows = cursor.fetchall()
             return [{"timestamp": row[0], "value": row[1], "unit": row[2]} for row in rows]
         except Exception as e:
             print(f"Warning: Could not get metric history: {e}")
@@ -780,7 +808,7 @@ class MonitoringModule:
                 "drops_out": row[8]
             } for row in rows]
         except Exception as e:
-            print(f"Warning: Could not get interface history: {e}")
+            logger.warning(f"Could not get interface history: {e}")
             return []
     
     def get_interface_details(self, interface_name: str) -> Optional[Dict[str, Any]]:

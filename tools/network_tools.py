@@ -151,7 +151,7 @@ class NetworkTools:
                     results.append(f"  [{port}] OPEN")
                 else:
                     results.append(f"  [{port}] closed")
-            except:
+            except Exception:
                 results.append(f"  [{port}] error")
         
         output = f"Port Scan Results for {host}:\n" + "\n".join(results)
@@ -290,7 +290,7 @@ class NetworkTools:
                 # Try to resolve if hostname
                 try:
                     ip = socket.gethostbyname(host)
-                except:
+                except Exception:
                     ip = host
                 
                 # Connect to port 80 or 443

@@ -195,5 +195,5 @@ async def stream_workflow(websocket: WebSocket):
     except Exception as e:
         try:
             await websocket.send_json({"type": "error", "message": str(e)})
-        except:
+        except Exception:
             pass

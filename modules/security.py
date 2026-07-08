@@ -180,23 +180,34 @@ class SecurityModule:
         return None
     
     def _check_weak_protocols(self, data: Dict) -> Optional[SecurityFinding]:
-        """Check for weak protocols"""
-        # Placeholder - would check actual protocol versions
+        """Check for weak protocols.
+        
+        TODO: Implement checks against actual protocol versions
+        (e.g., TLS 1.0/1.1, SSHv1, SNMPv1/v2).
+        """
         return None
     
     def _check_default_credentials(self, data: Dict) -> Optional[SecurityFinding]:
-        """Check for default credentials"""
-        # Placeholder - would check against known default creds
+        """Check for default credentials.
+        
+        TODO: Implement checks against known default credential databases
+        for common network vendors.
+        """
         return None
     
     def _check_unencrypted_traffic(self, data: Dict) -> Optional[SecurityFinding]:
-        """Check for unencrypted traffic"""
-        # Placeholder
+        """Check for unencrypted traffic.
+        
+        TODO: Implement checks for unencrypted protocols
+        (HTTP, FTP, Telnet) in active connections.
+        """
         return None
     
     def _check_missing_firewall(self, data: Dict) -> Optional[SecurityFinding]:
-        """Check for missing firewall rules"""
-        # Placeholder
+        """Check for missing firewall rules.
+        
+        TODO: Implement basic firewall rule presence validation.
+        """
         return None
     
     def check_compliance(self, standard: ComplianceStandard) -> List[ComplianceCheck]:
@@ -242,15 +253,17 @@ class SecurityModule:
                 control_id="NIST-ID.AM",
                 control_name="Asset Management",
                 standard=ComplianceStandard.NIST,
-                passed=True,
-                details="Asset identification process in place"
+                passed=False,
+                details="Asset identification process not yet validated",
+                gap="Automated asset verification not implemented"
             ),
             ComplianceCheck(
                 control_id="NIST-PR.AC",
                 control_name="Access Control",
                 standard=ComplianceStandard.NIST,
-                passed=True,
-                details="Access control mechanisms verified"
+                passed=False,
+                details="Access control mechanisms not yet verified",
+                gap="Automated access control audit not implemented"
             )
         ]
     
@@ -261,8 +274,9 @@ class SecurityModule:
                 control_id="A.9.1",
                 control_name="Access Control Policy",
                 standard=ComplianceStandard.ISO_27001,
-                passed=True,
-                details="Access control policy defined"
+                passed=False,
+                details="Access control policy not yet validated",
+                gap="Automated policy compliance audit not implemented"
             )
         ]
     

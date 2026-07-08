@@ -266,6 +266,13 @@ class GuardrailsModule:
         """Reset iteration count for session"""
         self.iteration_counts[session_id] = 0
     
+    # Ordered risk levels for proper comparison (lowest to highest)
+    _RISK_ORDER = [RiskLevel.INFO, RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL]
+    
+    def _risk_index(self, level: RiskLevel) -> int:
+        """Get numeric index for a risk level for proper ordering"""
+        return self._RISK_ORDER.index(level)
+    
     def assess_risk(self, actions: List[Dict[str, str]]) -> RiskLevel:
         """
         Assess overall risk level for a set of actions
@@ -282,7 +289,7 @@ class GuardrailsModule:
             cmd = action.get("command", "")
             risk = CommandClassifier.classify(cmd)
             
-            if risk.value > highest_risk.value:  # Compare enum values
+            if self._risk_index(risk) > self._risk_index(highest_risk):
                 highest_risk = risk
         
         return highest_risk
@@ -314,7 +321,7 @@ class GuardrailsModule:
             description = action.get("description", command)
             
             risk = CommandClassifier.classify(command)
-            if risk.value > max_risk.value:
+            if self._risk_index(risk) > self._risk_index(max_risk):
                 max_risk = risk
             
             planned_actions.append(PlannedAction(
@@ -341,12 +348,7 @@ class GuardrailsModule:
     
     def requires_approval(self, plan: ExecutionPlan) -> bool:
         """Check if plan requires human approval"""
-        # Compare risk level using value comparison
-        risk_order = [RiskLevel.INFO, RiskLevel.LOW, RiskLevel.MEDIUM, RiskLevel.HIGH, RiskLevel.CRITICAL]
-        plan_index = risk_order.index(plan.overall_risk)
-        threshold_index = risk_order.index(self.auto_approve_below)
-        
-        return plan_index > threshold_index
+        return self._risk_index(plan.overall_risk) > self._risk_index(self.auto_approve_below)
     
     async def request_approval(self, plan: ExecutionPlan) -> bool:
         """

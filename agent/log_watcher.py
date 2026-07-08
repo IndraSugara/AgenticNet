@@ -11,6 +11,7 @@ Inspired by OpenClaw's autonomous workflow execution pattern.
 """
 import asyncio
 import re
+import time
 from typing import Dict, List, Optional, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -219,6 +220,8 @@ class DeviceWatchConfig:
     enabled: bool = True
     auto_trigger_agent: bool = True
     auto_remediate: bool = True  # Enable autonomous remediation
+    interval_seconds: int = 60  # Log poll interval (used by status display)
+    last_check: float = 0  # Timestamp of last check
 
 
 # ============= LOG WATCHER SERVICE =============

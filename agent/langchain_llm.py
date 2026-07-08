@@ -21,12 +21,26 @@ logger = get_logger("langchain_llm")
 def _create_ollama_llm(model: str = None, base_url: str = None,
                        temperature: float = 0.7, timeout: int = 45) -> BaseChatModel:
     """Create ChatOllama instance"""
-    return ChatOllama(
-        model=model or config.OLLAMA_MODEL,
-        base_url=base_url or config.OLLAMA_HOST,
-        temperature=temperature,
-        timeout=timeout
-    )
+    import os
+    url = base_url or config.OLLAMA_HOST
+    
+    # Ensure the ollama library also uses this host (it checks env var internally)
+    os.environ["OLLAMA_HOST"] = url
+    
+    kwargs = {
+        "model": model or config.OLLAMA_MODEL,
+        "base_url": url,
+        "temperature": temperature,
+        "timeout": timeout,
+    }
+    
+    # If using ngrok, pass headers via client_kwargs to skip browser warning
+    if "ngrok" in url:
+        kwargs["client_kwargs"] = {
+            "headers": {"ngrok-skip-browser-warning": "true"}
+        }
+    
+    return ChatOllama(**kwargs)
 
 
 def _create_openai_llm(model: str = None, temperature: float = 0.7,
@@ -93,11 +107,7 @@ def get_llm(
         logger.warning(f"Unknown provider '{provider}', falling back to ollama")
         factory = _PROVIDER_FACTORY["ollama"]
     
-    # For ollama, pass base_url; for others, don't
-    if provider == "ollama":
-        return factory(model=model, temperature=temperature, timeout=timeout)
-    else:
-        return factory(model=model, temperature=temperature, timeout=timeout)
+    return factory(model=model, temperature=temperature, timeout=timeout)
 
 
 # ============= FALLBACK LLM WRAPPER =============
@@ -229,10 +239,7 @@ def get_llm_with_tools(tools: list, **kwargs) -> BaseChatModel:
     """
     llm = get_llm_with_fallback(**kwargs)
     
-    if isinstance(llm, FallbackLLM):
-        return llm.bind_tools(tools)
-    else:
-        return llm.bind_tools(tools)
+    return llm.bind_tools(tools)
 
 
 # ============= SINGLETON =============

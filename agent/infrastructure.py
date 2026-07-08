@@ -6,6 +6,10 @@ Device registry and management for office network infrastructure:
 - Device status tracking
 - Health check configuration
 - Uptime history
+
+Storage: Uses InventoryModule (modules/inventory.py) as single source of truth.
+Extra fields (health monitoring, SSH creds, status) are stored in the
+`device_extra` companion table within inventory.db.
 """
 from dataclasses import dataclass, field
 from typing import Dict, List, Any, Optional
@@ -13,8 +17,12 @@ from datetime import datetime
 from enum import Enum
 import json
 import asyncio
+import logging
 import os
-import sqlite3
+
+from modules.inventory import inventory, DeviceInfo, VendorType, DeviceRole
+
+logger = logging.getLogger("infrastructure")
 
 
 class DeviceType(Enum):
@@ -141,9 +149,25 @@ class NetworkDevice:
         self.uptime_percent = (online_count / len(self.health_history)) * 100
 
 
+# Mapping between DeviceType and DeviceRole for inventory sync
+_TYPE_TO_ROLE = {
+    DeviceType.ROUTER: DeviceRole.ROUTER,
+    DeviceType.SWITCH: DeviceRole.SWITCH,
+    DeviceType.SERVER: DeviceRole.SERVER,
+    DeviceType.FIREWALL: DeviceRole.FIREWALL,
+    DeviceType.ACCESS_POINT: DeviceRole.ACCESS_POINT,
+}
+
+_ROLE_TO_TYPE = {v: k for k, v in _TYPE_TO_ROLE.items()}
+
+
 class InfrastructureManager:
     """
-    Manages office network infrastructure devices
+    Manages office network infrastructure devices.
+    
+    Uses InventoryModule as the single source of truth for device data.
+    Extra fields (health monitoring, SSH credentials, status) are stored
+    in the `device_extra` companion table within inventory.db.
     
     Features:
     - Device registration and discovery
@@ -152,132 +176,100 @@ class InfrastructureManager:
     - Uptime reporting
     """
     
-    DB_PATH = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "devices.db")
-    
     def __init__(self):
         self.devices: Dict[str, NetworkDevice] = {}
         self._device_counter = 0
         self._status_callbacks: List = []
-        self._init_db()
         self._load_from_db()
     
-    def _get_connection(self):
-        """Get SQLite connection with threading support"""
-        return sqlite3.connect(self.DB_PATH, check_same_thread=False)
-    
-    def _init_db(self):
-        """Initialize SQLite database and create table if needed"""
-        os.makedirs(os.path.dirname(self.DB_PATH), exist_ok=True)
-        conn = self._get_connection()
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS devices (
-                id TEXT PRIMARY KEY,
-                name TEXT NOT NULL,
-                ip TEXT NOT NULL,
-                type TEXT DEFAULT 'other',
-                description TEXT DEFAULT '',
-                location TEXT DEFAULT '',
-                ports_to_monitor TEXT DEFAULT '[]',
-                check_interval_seconds INTEGER DEFAULT 60,
-                enabled INTEGER DEFAULT 1,
-                created_at TEXT,
-                connection_protocol TEXT DEFAULT 'none',
-                ssh_port INTEGER DEFAULT 22,
-                ssh_username TEXT DEFAULT '',
-                ssh_password TEXT DEFAULT ''
-            )
-        """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS meta (
-                key TEXT PRIMARY KEY,
-                value TEXT
-            )
-        """)
-        conn.commit()
-        conn.close()
-    
-    def _save_device_to_db(self, device: NetworkDevice):
-        """Save or update a single device in the database"""
-        try:
-            conn = self._get_connection()
-            conn.execute("""
-                INSERT OR REPLACE INTO devices 
-                (id, name, ip, type, description, location, ports_to_monitor, 
-                 check_interval_seconds, enabled, created_at, 
-                 connection_protocol, ssh_port, ssh_username, ssh_password)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """, (
-                device.id, device.name, device.ip, device.type.value,
-                device.description, device.location,
-                json.dumps(device.ports_to_monitor),
-                device.check_interval_seconds, int(device.enabled),
-                device.created_at, device.connection_protocol,
-                device.ssh_port, device.ssh_username, device.ssh_password
-            ))
-            # Save counter
-            conn.execute(
-                "INSERT OR REPLACE INTO meta (key, value) VALUES ('device_counter', ?)",
-                (str(self._device_counter),)
-            )
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            print(f"Warning: Could not save device to DB: {e}")
-    
-    def _delete_device_from_db(self, device_id: str):
-        """Delete a device from the database"""
-        try:
-            conn = self._get_connection()
-            conn.execute("DELETE FROM devices WHERE id = ?", (device_id,))
-            conn.commit()
-            conn.close()
-        except Exception as e:
-            print(f"Warning: Could not delete device from DB: {e}")
-    
     def _load_from_db(self):
-        """Load all devices from SQLite database"""
+        """Load all devices from inventory + device_extra tables."""
         try:
-            conn = self._get_connection()
-            conn.row_factory = sqlite3.Row
+            # Load all inventory devices
+            all_devices = inventory.list_devices(enabled_only=False)
+            all_extras = inventory.get_all_device_extras()
             
-            # Load counter
-            cursor = conn.execute("SELECT value FROM meta WHERE key = 'device_counter'")
-            row = cursor.fetchone()
-            if row:
-                self._device_counter = int(row['value'])
-            
-            # Load devices
-            cursor = conn.execute("SELECT * FROM devices")
-            for row in cursor.fetchall():
-                try:
-                    dev_type = DeviceType(row['type'])
-                except ValueError:
-                    dev_type = DeviceType.OTHER
+            for dev_info in all_devices:
+                extra = all_extras.get(dev_info.id)
+                
+                # Determine device type from role
+                dev_type = _ROLE_TO_TYPE.get(dev_info.role, DeviceType.OTHER)
                 
                 device = NetworkDevice(
-                    id=row['id'],
-                    name=row['name'],
-                    ip=row['ip'],
+                    id=dev_info.id,
+                    name=dev_info.name,
+                    ip=dev_info.ip_address,
                     type=dev_type,
-                    description=row['description'] or "",
-                    location=row['location'] or "",
-                    ports_to_monitor=json.loads(row['ports_to_monitor'] or '[]'),
-                    check_interval_seconds=row['check_interval_seconds'] or 60,
-                    enabled=bool(row['enabled']),
-                    created_at=row['created_at'] or datetime.now().isoformat(),
-                    connection_protocol=row['connection_protocol'] or "none",
-                    ssh_port=row['ssh_port'] or 22,
-                    ssh_username=row['ssh_username'] or "",
-                    ssh_password=row['ssh_password'] or "",
+                    description=dev_info.description,
+                    location=dev_info.location,
+                    enabled=dev_info.enabled,
+                    ssh_port=dev_info.ssh_port,
                 )
-                self.devices[row['id']] = device
+                
+                # Apply extra fields if they exist
+                if extra:
+                    device.ports_to_monitor = extra.get("ports_to_monitor", [])
+                    device.check_interval_seconds = extra.get("check_interval_seconds", 60)
+                    device.connection_protocol = extra.get("connection_protocol", "none")
+                    device.ssh_username = extra.get("ssh_username", "")
+                    device.ssh_password = extra.get("ssh_password", "")
+                    device.created_at = extra.get("created_at", device.created_at)
+                    device.uptime_percent = extra.get("uptime_percent", 100.0)
+                    device.last_check = extra.get("last_check")
+                    device.last_online = extra.get("last_online")
+                    try:
+                        device.status = DeviceStatus(extra.get("status", "unknown"))
+                    except ValueError:
+                        device.status = DeviceStatus.UNKNOWN
+                
+                self.devices[dev_info.id] = device
+                
+                # Track highest ID for counter
+                if dev_info.id.startswith("dev_"):
+                    try:
+                        num = int(dev_info.id.replace("dev_", ""))
+                        if num > self._device_counter:
+                            self._device_counter = num
+                    except ValueError:
+                        pass
             
-            conn.close()
             if self.devices:
-                print(f"✓ Loaded {len(self.devices)} devices from database")
+                logger.info(f"Loaded {len(self.devices)} devices from inventory")
         except Exception as e:
-            print(f"Warning: Could not load devices from DB: {e}")
+            logger.warning(f"Could not load devices from inventory: {e}")
     
+    def _save_device_extra(self, device: NetworkDevice):
+        """Persist extra fields to device_extra table."""
+        inventory.save_device_extra(device.id, {
+            "ports_to_monitor": device.ports_to_monitor,
+            "check_interval_seconds": device.check_interval_seconds,
+            "connection_protocol": device.connection_protocol,
+            "ssh_username": device.ssh_username,
+            "ssh_password": device.ssh_password,
+            "status": device.status.value,
+            "last_check": device.last_check,
+            "last_online": device.last_online,
+            "uptime_percent": device.uptime_percent,
+            "created_at": device.created_at,
+        })
+    
+    # Legacy alias — some callers reference _save_device_to_db directly
+    def _save_device_to_db(self, device: NetworkDevice):
+        """Save device to inventory + device_extra. Legacy alias."""
+        # Update the inventory core fields
+        dev_info = DeviceInfo(
+            id=device.id,
+            name=device.name,
+            ip_address=device.ip,
+            vendor=inventory.detect_vendor(device.name),
+            role=_TYPE_TO_ROLE.get(device.type, DeviceRole.OTHER),
+            location=device.location,
+            description=device.description,
+            ssh_port=device.ssh_port,
+            enabled=device.enabled,
+        )
+        inventory.update_device(dev_info)
+        self._save_device_extra(device)
     
     def _generate_id(self) -> str:
         """Generate unique device ID"""
@@ -295,19 +287,10 @@ class InfrastructureManager:
         check_interval: int = 60
     ) -> NetworkDevice:
         """
-        Add a new device to the registry
+        Add a new device to the registry.
         
-        Args:
-            name: Device display name
-            ip: IP address
-            device_type: Type (router, switch, server, etc.)
-            description: Optional description
-            location: Physical/logical location
-            ports_to_monitor: List of ports to check
-            check_interval: Health check interval in seconds
-            
-        Returns:
-            Newly created NetworkDevice
+        Writes to InventoryModule (inventory.db) as single source of truth,
+        then saves extra fields to device_extra table.
         """
         device_id = self._generate_id()
         
@@ -332,8 +315,24 @@ class InfrastructureManager:
             check_interval_seconds=check_interval
         )
         
+        # Write core fields to inventory.db (single source of truth)
+        role = _TYPE_TO_ROLE.get(dev_type, DeviceRole.OTHER)
+        vendor = inventory.detect_vendor(name)
+        dev_info = DeviceInfo(
+            id=device_id,
+            name=name,
+            ip_address=ip,
+            vendor=vendor,
+            role=role,
+            location=location,
+            description=description,
+        )
+        inventory.add_device(dev_info)
+        
+        # Write extra fields to device_extra table
+        self._save_device_extra(device)
+        
         self.devices[device_id] = device
-        self._save_device_to_db(device)
         return device
     
     def _default_ports(self, device_type: DeviceType) -> List[int]:
@@ -351,10 +350,13 @@ class InfrastructureManager:
         return defaults.get(device_type, [80, 443])
     
     def remove_device(self, device_id: str) -> bool:
-        """Remove a device from the registry"""
+        """Remove a device from the registry (both inventory + device_extra)."""
         if device_id in self.devices:
+            device = self.devices[device_id]
+            # Delete from inventory (single source of truth)
+            inventory.delete_device(device_id)
+            inventory.delete_device_extra(device_id)
             del self.devices[device_id]
-            self._delete_device_from_db(device_id)
             return True
         return False
     

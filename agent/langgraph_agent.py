@@ -270,7 +270,7 @@ def create_agent_node(llm_with_tools, llm_base=None):
             
             # Log error with stack trace for debugging
             logger.error(f"Agent error processing message: {e}", exc_info=True)
-            error_msg = f"⚠️ Maaf, terjadi error saat memproses: {str(e)}"
+            error_msg = f"⚠️ Maaf, terjadi error saat memprosess: {str(e)}"
             return {"messages": [AIMessage(content=error_msg)]}
     
     return agent_node
